@@ -1,0 +1,19 @@
+
+* Notes
+
+lens library has facilities that could help with state monads (import Control.Lens)
+https://hackage.haskell.org/package/lens
+
+
+Why do wee pass source code? Why don't pass a tree in some kind of a standard format?
+
+
+* Questions
+
+What is the difference between make and gmake?
+
+
+* Tasks 
+
+** Change make file and introduce dependency 
+SCHEDULED: <2016-07-25 Mon>

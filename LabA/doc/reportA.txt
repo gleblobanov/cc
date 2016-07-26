@@ -1,0 +1,20 @@
+Gleb Lobanov (Group 15)
+mail@gleblobanov.ru
+
+* Typechecker takes a Javalette source file and returns "ERROR" if it contains type
+errors and "OK" if it doesn't. 
+
+* Javalette language is produced by BNF converter, q.v. BNFC source file JL.cf.
+
+* The parser has one shift/reduce confict in the if-else statement. The statement is
+described in the part of the grammar:
+
+SIf.     Stm    ::= "if" "(" Exp ")" IfRest ;
+IfR.     IfRest ::= Stm IfRestRest ;
+IfRE.    IfRest ::= ";" ;
+IfRREl.  IfRestRest ::= "else" Stm ;
+IfRRE.   IfRestRest ::= ;
+
+The parser has ambiguous situation when it reads an 'else' token as lookahead
+element of the parsing process. It could either reduce to the rule IfR or shift
+to the IfRREl.

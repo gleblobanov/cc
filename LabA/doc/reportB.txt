@@ -1,0 +1,14 @@
+Gleb Lobanov (Group 15)
+mail@gleblobanov.ru
+
+I've began to implement code generator. There are some modules I'm working on now:
+
+CodeGenerator is a main entrance to the LLVM generation and linearisation
+Builder contains building and linking functions.
+Strings contains JVL tree traversal that returns a list of strings that
+I'm declaring as global variables in the beginning of the LLVM file.
+LLVMTypes contains LLVM Types.
+LLVMSyntax contains syntax of a LLVM program.
+Statements & Expressions contain Javalette tree traversal and linearization
+to jvm assembly code that I'm changing with transformation to LLVM tree.
+
