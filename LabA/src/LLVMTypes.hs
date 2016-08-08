@@ -13,7 +13,8 @@ data LLVMType = TypeInteger
               | TypeString
               | TypeFunction LLVMType [LLVMType]
               | TypeStructure [LLVMType]
-              | TypeArray [LLVMType]
+              | TypeArray Int LLVMType
+              | TypePtr LLVMTypePtr
 
 instance Show LLVMType where
   show instr = case instr of
@@ -26,7 +27,8 @@ instance Show LLVMType where
     TypeString  -> "i8*"
     TypeFunction t ts -> ""
     TypeStructure ts  -> ""
-    TypeArray t       -> ""
+    TypeArray size t  -> "[" ++ show size ++ " x " ++ show t ++ "]"
+    TypePtr t -> show t
 
 data LLVMTypePtr = TypeIntegerPtr
                  | TypeCharPtr
@@ -35,7 +37,8 @@ data LLVMTypePtr = TypeIntegerPtr
                  | TypeDoublePtr
                  | TypeFunctionPtr LLVMType [LLVMType]
                  | TypeStructurePtr [LLVMType]
-                 | TypeArrayPtr [LLVMType]
+                 | TypeArrayPtr Int LLVMType
+                 | TypeArrayOfPtr [LLVMTypePtr]
                  | NonePtr
 
 instance Show LLVMTypePtr where
@@ -47,7 +50,8 @@ instance Show LLVMTypePtr where
     TypeDoublePtr  -> "double*"
     TypeFunctionPtr t ts -> ""
     TypeStructurePtr ts  -> ""
-    TypeArrayPtr t       -> ""
+    TypeArrayPtr t l     -> show (TypeArray t l) ++ "*"
+    TypeArrayOfPtr t     -> ""
     _ -> ""
 
 
@@ -59,9 +63,21 @@ typeToPtr TypeFloat = TypeFloatPtr
 typeToPtr TypeDouble = TypeDoublePtr
 typeToPtr (TypeFunction t ts) = TypeFunctionPtr t ts
 typeToPtr (TypeStructure ts) = TypeStructurePtr ts
-typeToPtr (TypeArray t) = TypeArrayPtr t
-typeToPtr TypeString = NonePtr
-typeToPtr TypeVoid = NonePtr
+typeToPtr (TypeArray t l) = TypeArrayPtr t l
+typeToPtr _ = NonePtr
+
+typeFromPtr :: LLVMTypePtr -> LLVMType
+typeFromPtr TypeIntegerPtr = TypeInteger
+typeFromPtr TypeCharPtr    = TypeChar
+typeFromPtr TypeBooleanPtr = TypeBoolean
+typeFromPtr TypeFloatPtr = TypeFloat
+typeFromPtr TypeDoublePtr = TypeDouble
+typeFromPtr (TypeFunctionPtr t ts) = TypeFunction t ts
+typeFromPtr (TypeStructurePtr ts) = TypeStructure ts
+typeFromPtr (TypeArrayPtr t l) = TypeArray t l
+typeFromPtr _ = TypeVoid
+
+
 
 
 

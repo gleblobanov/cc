@@ -6,6 +6,7 @@ import Data.Map (Map)
 import Environment
 import LLVMSyntax
 
+-- | Traverse a syntax tree and collect global strings
 findStrings :: [Def] -> EnvState Env [Def]
 findStrings defs = EnvState (\(ls, sc, fs, _, t) ->
   let gs = foldl findStringsFun [] defs
@@ -35,9 +36,12 @@ findStringsStm gs stm =
       ReturnRestEmpt -> gs
 
 findStringsExp :: GlobalStrings -> Exp -> GlobalStrings
-findStringsExp gs (EString str) =  (str, (strId, length str + 1)) : gs
-  where strId = "str" ++ show (length gs)
-findStringsExp gs _             = gs
+findStringsExp gs e
+  = let strId = "str" ++ show (length gs)
+    in case e of
+  (EString str) -> (str, (GlobalId strId, length str + 1)) : gs
+  (EApp _ es)  -> foldl findStringsExp gs es
+  _             -> gs
 
 
 toGlobalVars :: GlobalStrings -> String

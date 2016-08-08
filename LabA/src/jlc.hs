@@ -34,7 +34,7 @@ main = do
                  program <- typeCheck content
                  let code = generateCode program
                  writeFile progLL code
-                 link
+                 build
     _      -> do
       putStrLn "Usage: lab2 <SourceFile>"
       exitFailure

@@ -21,9 +21,10 @@ transStms (s:ss) =
 
 
 transSExp :: Exp -> [Stm] -> EnvState Env [LLVMStm]
-transSExp e ss = do (instr, expStms) <- transExp e
+transSExp e ss = do (_, expStms) <- transExp e
                     restStms <- transStms ss
                     return $ expStms ++ restStms
+
 
 
 transSDecls :: Type -> [Id] -> [Stm] -> EnvState Env [LLVMStm]
@@ -46,10 +47,10 @@ mkDeclStm t vid = do (ident, t') <- extendVar vid t
 
 
 transSInit :: Type -> [Id] -> Exp -> [Stm] -> EnvState Env [LLVMStm]
-transSInit t ids e ss = do (instr, expStms) <- transExp e
+transSInit t ids e ss = do (lid, expStms) <- transExp e
                            cnt <- getCounter
                            let tmp    = IdentLocal (LocalId $ "tmp" ++ show cnt)
-                               sInstr = LLVMStmAssgn tmp instr
+                               sInstr = LLVMStmAssgn tmp (IdentInstr (IdentLocal lid))
                            initStms <- mkInitStms t ids tmp
                            restStms <- transStms ss
                            return $ expStms ++ [sInstr] ++ initStms ++ restStms
@@ -73,11 +74,11 @@ mkInitStm t vid tmp = do (identPtr, t') <- extendVar vid t
 
 transSReturn :: ReturnRest ->  EnvState Env [LLVMStm]
 transSReturn rest = case rest of
-  ReturnRest e -> do (instr, expStms) <- transExp e
+  ReturnRest e -> do (lid, expStms) <- transExp e
                      t <- getType
                      cnt <- getCounter
                      let tmp    = IdentLocal (LocalId $ "tmp" ++ show cnt)
-                         sInstr = LLVMStmAssgn tmp instr
+                         sInstr = LLVMStmAssgn tmp (Load (typeToPtr t) (OI (IdentLocal lid)))
                          retStm = LLVMStmInstr (Return t (OI tmp))
                      return $ expStms ++ [sInstr, retStm]
   ReturnRestEmpt -> return [LLVMStmInstr ReturnVoid]
@@ -92,7 +93,7 @@ transSWhile e stm ss = do whileStms <- transWhile e stm
                           return $ whileStms ++ restStms
 
 transWhile :: Exp -> Stm -> EnvState Env [LLVMStm]
-transWhile e stm = do (instr, expStms) <- transExp e
+transWhile e stm = do (lid, expStms) <- transExp e
                       stms <- transStms [stm]
                       c1 <- getCounter
                       c2 <- getCounter
@@ -105,7 +106,7 @@ transWhile e stm = do (instr, expStms) <- transExp e
                           l3  = LLVMLabel $ show c3
                           sl3 = LLVMStmLabel l3
                           tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                          sInstr    = LLVMStmAssgn tmp instr
+                          sInstr    = LLVMStmAssgn tmp (IdentInstr (IdentLocal lid))
                           condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l2) (show l3))
                           uncondStm = LLVMStmInstr (UncondBranch (show l1))
                           res = [sl1]       ++
@@ -134,6 +135,9 @@ transBlock stms = do newBlock
 
 
 
+
+
+
 transSIf :: Exp -> IfRest -> [Stm] -> EnvState Env [LLVMStm]
 transSIf e r ss = do ifStms <- transIf e r
                      restStms  <- transStms ss
@@ -142,7 +146,7 @@ transSIf e r ss = do ifStms <- transIf e r
 transIf :: Exp -> IfRest -> EnvState Env [LLVMStm]
 transIf e r = case r of
   IfR stm rr -> case rr of
-    IfRREl stmEl -> do (instr, expStms) <- transExp e
+    IfRREl stmEl -> do (lid, expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        c3 <- getCounter
@@ -156,7 +160,7 @@ transIf e r = case r of
                            l3  = LLVMLabel $ show c3
                            sl3 = LLVMStmLabel l3
                            tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                           sInstr    = LLVMStmAssgn tmp instr
+                           sInstr    = LLVMStmAssgn tmp (IdentInstr (IdentLocal lid))
                            condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l1) (show l2))
                            uncondStm = LLVMStmInstr (UncondBranch (show l3))
                            res = expStms    ++
@@ -170,7 +174,7 @@ transIf e r = case r of
                                 [sl3]
                        return res
 
-    IfRRE        -> do (instr, expStms) <- transExp e
+    IfRRE        -> do (lid, expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        ct <- getCounter
@@ -180,7 +184,7 @@ transIf e r = case r of
                            l2  = LLVMLabel $ show c2
                            sl2 = LLVMStmLabel l2
                            tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                           sInstr    = LLVMStmAssgn tmp instr
+                           sInstr    = LLVMStmAssgn tmp (IdentInstr (IdentLocal lid))
                            condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l1) (show l2))
                            res = expStms    ++
                                 [sInstr]    ++
@@ -190,6 +194,6 @@ transIf e r = case r of
                                 [sl2]
                        return res
 
-  IfRE -> do (instr, expStms) <- transExp e
-             let sInstr = LLVMStmInstr instr
+  IfRE -> do (lid, expStms) <- transExp e
+             let sInstr = LLVMStmInstr (IdentInstr (IdentLocal lid))
              return $ expStms ++ [sInstr]

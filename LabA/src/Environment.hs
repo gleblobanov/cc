@@ -10,6 +10,25 @@ import AbsJL
 
 type Env = ([LLVMLabel], Scope, Funs, GlobalStrings, LLVMType)
 
+put :: Env -> EnvState Env ()
+put env = EnvState (const ((), env))
+
+get :: EnvState Env Env
+get = EnvState (\env -> (env, env))
+
+runEnvState :: EnvState Env a -> (a, Env)
+runEnvState (EnvState f) = f emptyEnv
+
+
+instance Functor (EnvState q) where
+   fmap f m = m >>= \a -> return (f a)
+
+instance Applicative (EnvState q) where
+   pure  = return
+   (<*>) a_f a_x = a_f >>= \f -> a_x >>= \x -> pure $ f x
+
+
+
 type GlobalStrings = [(String, (GlobalId, Int))]
 
 emptyEnv :: Env
@@ -17,6 +36,9 @@ emptyEnv = ([], Scope [[]] 0, emptyFuns, [], TypeVoid)
 
 getGlobalStrings :: Env -> GlobalStrings
 getGlobalStrings (_, _, _, gs, _) = gs
+
+getFuns :: Env -> Funs
+getFuns (_, _, funs, _, _) = funs
 
 lookupGS :: String -> EnvState Env (Maybe (GlobalId, Int))
 lookupGS str = EnvState (\env -> let gs = getGlobalStrings env
@@ -39,6 +61,8 @@ putType t = EnvState (\(l, s, f, g, _) -> ((), (l, s, f, g, t)))
 getType :: EnvState Env LLVMType
 getType = EnvState (\(l, s, f, g, t) -> (t, (l, s, f, g, t)))
 
+getScope :: EnvState Env Scope
+getScope = EnvState (\(l, s, f, g, t) -> (s, (l, s, f, g, t)))
 
 type Funs = Map Id FunType
 type FunType = (LLVMType, GlobalId, LLVMArgs)
@@ -53,27 +77,10 @@ instance Monad (EnvState e) where
                                               EnvState k_m = k a
                                           in k_m s_2
 
-put :: Env -> EnvState Env ()
-put env = EnvState (const ((), env))
-
-get :: EnvState Env Env
-get = EnvState (\env -> (env, env))
-
-runEnvState :: EnvState Env a -> (a, Env)
-runEnvState (EnvState f) = f emptyEnv
-
-
-instance Functor (EnvState q) where
-   fmap f m = m >>= \a -> return (f a)
-
-instance Applicative (EnvState q) where
-   pure  = return
-   (<*>) a_f a_x = a_f >>= \f -> a_x >>= \x -> pure $ f x
-
 
 
 collectFuns :: [Def] -> EnvState Env [Def]
-collectFuns = foldr ((>>) . extendFun) (return [])
+collectFuns defs = foldr ((>>) . extendFun) (return defs) defs
 
 newBlock :: EnvState Env ()
 newBlock = EnvState (\(ls, Scope st n, fs, gs, t) -> ((), (ls, Scope ([]:st) n, fs, gs, t)))

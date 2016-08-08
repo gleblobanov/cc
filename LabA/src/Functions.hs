@@ -25,8 +25,8 @@ module Functions where
 
 declPrintRead :: String
 declPrintRead = "declare void @printInt(i32)\n\
-                          \declare void @printDouble(double)\n\
-                          \declare void @printString(i8*)\n\
-                          \declare i32 @readInt()\n\
-                          \declare double @readDouble()\n"
+                \declare void @printDouble(double)\n\
+                \declare void @printString(i8*)\n\
+                \declare i32 @readInt()\n\
+                \declare double @readDouble()\n"
 

@@ -3,9 +3,11 @@ module LLVMSyntax where
 import Data.List
 import LLVMTypes
 
-data Operand = OI Identifier | OC Constant
+data Operand = OI Identifier | OC Constant | OT LLVMType Operand
 instance Show Operand where
-  show = show
+  show (OI i)   = show i
+  show (OC c)   = show c
+  show (OT t o) = show t ++ " " ++ show o
 
 
 data Identifier = IdentLocal LocalId
@@ -18,14 +20,16 @@ getIdentStr (IdentGlobal (GlobalId str)) = str
 
 
 
-data LocalId = LocalId String
+data LocalId = LocalId String | EmptyLocalId
 instance Show LocalId where
-  show (LocalId lid)  = "@" ++ lid
+  show (LocalId lid)  = "%" ++ lid
+
+
 
 
 data GlobalId = GlobalId String
 instance Show GlobalId where
-  show (GlobalId gid) = "%" ++ gid
+  show (GlobalId gid) = "@" ++ gid
 
 
 data Constant = ConstTrue
@@ -36,7 +40,7 @@ instance Show Constant where
   show ConstTrue  = "true"
   show ConstFalse = "false"
   show (ConstDouble d)   = show d
-  show (ConstInteger i) = show i
+  show (ConstInteger i)  = show i
 
 
 data Cond = Eq  -- equal
@@ -63,6 +67,7 @@ instance Show Cond where
     Sle -> "sle"
 
 
+
 data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
                  | FMul LLVMType Operand Operand   -- Multiply two floats
                  | Add  LLVMType Operand Operand
@@ -77,13 +82,13 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
                  | Or  LLVMType Operand Operand
 
                  | Allocate LLVMType
-                 | GetElementPtr LLVMType LLVMTypePtr Operand
+                 | GetElementPtr LLVMTypePtr Operand Operand Operand
                  | Store LLVMType Operand LLVMTypePtr Identifier
-                 | Load  LLVMType Operand LLVMTypePtr Identifier
+                 | Load  LLVMTypePtr Operand
 
                  | ICmp Cond LLVMType Operand Operand
                  | FCmp Cond LLVMType Operand Operand
-                 | Call LLVMType Identifier [LLVMArg]
+                 | Call LLVMType Identifier LLVMArgs
 
                  | Return LLVMType Operand
                  | ReturnVoid
@@ -92,6 +97,7 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
 
                  | EmptyInstr
                  | ConstInstr Constant
+                 | IdentInstr Identifier
 
 data LLVMLabel = LLVMLabel String
 instance Show LLVMLabel where
@@ -116,15 +122,14 @@ instance Show Instruction where
       Or   t o1 o2 -> "or "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
 
       Allocate t           -> "alloca " ++ show t
-      GetElementPtr t tp o ->
-        "getelementptr " ++ show t ++ ", " ++ show tp ++ " " ++ show o
+      GetElementPtr t o1 o2 o3 ->
+        "getelementptr " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
+                                   ++  ", " ++ show o3
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
         show tp ++ " " ++ show o2
-      Load t o1 tp o2      ->
-        "load " ++ show t ++ " " ++ show o1 ++ ", " ++
-        show tp ++ " " ++ show o2
-
+      Load t o ->
+        "load " ++ show t ++ " " ++ show o
       ICmp c t o1 o2 ->
         "icmp " ++ show c ++ " " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FCmp c t o1 o2 ->
@@ -153,7 +158,10 @@ instance Show Instruction where
         "label " ++
         show l
 
+      ConstInstr const -> show const
+
       EmptyInstr -> ""
+      IdentInstr i -> show i
 
 data LLVMArg = LLVMArg LLVMType LocalId
 instance Show LLVMArg where
@@ -166,7 +174,7 @@ instance Show LLVMArgs where
 data LLVMFunction = LLVMFunction LLVMType GlobalId LLVMArgs [LLVMStm]
 instance Show LLVMFunction where
   show (LLVMFunction t fid args stms) =
-    "define " ++ show t ++ " " ++ show fid ++ "(" ++ show args ++ "){\n" ++
+    "define " ++ show t ++ " " ++ show fid ++ " (" ++ show args ++ ") {\n" ++
     instrsCode ++ "\n}\n\n"
     where instrsCode = concatMap show stms
 

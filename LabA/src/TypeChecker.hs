@@ -314,7 +314,7 @@ inferExp env x = case x of
          EMod e1 e2 -> do t1 <- inferExp env e1
                           t2 <- inferExp env e2
                           if t1 == Type_int && t2 == Type_int
-                          then return Type_int 
+                          then return Type_int
                           else fail "An argument of mod\
                                   \has a different type, not int."
          EPlus exp0 exp -> inferArithmBin env exp0 exp
