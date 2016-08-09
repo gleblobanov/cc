@@ -5,7 +5,7 @@ import LLVMSyntax
 import Environment
 import LLVMTypes
 
-transExp :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transExp :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transExp exp =   case exp of
  ETrue        -> transTrue
  EFalse       -> transFalse
@@ -42,33 +42,19 @@ transExp exp =   case exp of
 
 --
 
-transConst :: Constant -> LLVMType -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
-transConst c t = do cnt <- getCounter
-                    let lid =  Local $ "t" ++ show cnt
-                        i1 = Allocate t
-                        s1 = LLVMStmAssgn lid i1
-                        i2 = Store t (OC c) t lid
-                        s2 = LLVMStmInstr i2
-                    return ((lid, t), [s1, s2])
+transConst :: Constant -> LLVMType -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transConst c t = return ((OC c, t), [])
 
-
-
-transTrue :: EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transTrue :: EnvState Env ((Operand, LLVMType), [LLVMStm])
 transTrue = transConst ConstTrue TypeBoolean
 
-
-
-transFalse :: EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transFalse :: EnvState Env ((Operand, LLVMType), [LLVMStm])
 transFalse = transConst ConstFalse TypeBoolean
 
-
-
-transInteger :: Integer -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transInteger :: Integer -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transInteger i = transConst (ConstInteger i) TypeInteger
 
-
-
-transDouble :: Double -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transDouble :: Double -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transDouble d = transConst (ConstDouble d) TypeDouble
 
 --
@@ -76,7 +62,7 @@ transDouble d = transConst (ConstDouble d) TypeDouble
 
 
 
-transString :: String -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transString :: String -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transString s = do cnt <- getCounter
                    env <- get
                    let gs = getGlobalStrings env
@@ -87,7 +73,7 @@ transString s = do cnt <- getCounter
                                                inst = GetElementPtr ta o o' o'
                                                t =  Local $ "t" ++ show cnt
                                                sInstr = LLVMStmAssgn t inst
-                                           return ((t, typeFromPtr ta), [sInstr])
+                                           return ((OI t, typeFromPtr ta), [sInstr])
                      Nothing -> fail $ "LLVM global variable for a string isn't found (" ++ s ++ ")."
 
 
@@ -100,114 +86,128 @@ transString s = do cnt <- getCounter
 
 
 
-transId :: Id -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transId vid = do res <- lookupVar vid
                  return (res, [])
 
 
 
 
-transApp :: Id -> [Exp] -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transApp :: Id -> [Exp] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transApp (Id "printString") [EString s] =
-  do ((lid, t), stms) <- transString s
-     let call = Call TypeVoid (Global "printString")
+  do ((OI lid, t), stms) <- transString s
+     res <- genLocal
+     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printString")
                     (LLVMArgs [LLVMArg (TypePtr TypeChar) lid])
-     return ((lid, t), stms ++ [LLVMStmInstr call])
+     return ((OI res, t), stms ++ [call])
 
 transApp (Id "printInt") [e] =
-  do ((lid, t), stms) <- transExp e
-     let call = Call TypeVoid (Global "printInt")
+  do ((OI lid, t), stms) <- transExp e
+     res <- genLocal
+     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printInt")
                     (LLVMArgs [LLVMArg (TypePtr TypeInteger) lid])
-     return ((lid, t), stms ++ [LLVMStmInstr call])
+     return ((OI res, t), stms ++ [call])
 
 transApp (Id "printDouble") [e] =
-  do ((lid, t), stms) <- transExp e
-     let call = Call TypeVoid (Global "printDouble")
+  do ((OI lid, t), stms) <- transExp e
+     res <- genLocal
+     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printDouble")
                     (LLVMArgs [LLVMArg (TypePtr TypeDouble) lid])
-     return ((lid, t), stms ++ [LLVMStmInstr call])
+     return ((OI res, t), stms ++ [call])
 
 transApp fid args = do executedArgsStms <- execArgs args
-                       lid1 <- genLocal
-                       lid2 <- genLocal
+                       res <- genLocal
                        funs <- getFuns
-                       let executedArgs = map fst executedArgsStms
+                       let executedArgs =map fst executedArgsStms
                            executedSS   = concatMap snd executedArgsStms
-                           llvmArgs = LLVMArgs $ map (\(ident, typ) -> LLVMArg typ ident)
-                                                     executedArgs
+                           llvmArgs = LLVMArgs $ map ((\(ident, typ) -> LLVMArg typ ident) .
+                                                      (\(OI i, t) -> (i, t))) executedArgs
                        case lookup fid funs of
                          Just (ftyp, fid', _) ->
-                          let --stm1 = LLVMStmAssgn lid1 (Load ftyp (OI fid'))
-                              stm2 = LLVMStmAssgn lid2 $ Call ftyp fid' llvmArgs
-                          in return ((lid2, ftyp), executedSS ++ [stm2])
+                          let stm = LLVMStmAssgn res $ Call ftyp fid' llvmArgs
+                          in return ((OI res, ftyp), executedSS ++ [stm])
                          Nothing -> fail $ "Function isn't found. " ++ show fid
 
-execArgs :: [Exp] -> EnvState Env [((Identifier, LLVMType), [LLVMStm])]
+execArgs :: [Exp] -> EnvState Env [((Operand, LLVMType), [LLVMStm])]
 execArgs = mapM transExp
 
 
-emitOperation :: Instruction -> EnvState Env (Identifier, [LLVMStm])
+emitOperation :: Instruction -> EnvState Env (Operand, [LLVMStm])
 emitOperation instr =
   do
     cnt <- getCounter
-    let lid' = Local $ "t" ++ show cnt
-        stm   = LLVMStmAssgn lid' instr
-    return (lid', [stm])
+    let res = Local $ "t" ++ show cnt
+        stm   = LLVMStmAssgn res instr
+    return (OI res, [stm])
 
 
 
-transNeg :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transNeg :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNeg e =
   do ((lid, t), expStms) <- transExp e
      case t of
        TypeInteger -> do (lid', stms) <- emitOperation $ Sub TypeInteger
                                                             (OC $ ConstInteger 0)
-                                                            (OI lid)
+                                                            lid
                          return ((lid', t), expStms ++ stms)
        TypeDouble  -> do (lid', stms) <- emitOperation $ FSub TypeDouble
                                                              (OC $ ConstDouble 0.0)
-                                                             (OI lid)
+                                                             lid
                          return ((lid', t), expStms ++ stms)
        _           -> fail "transNeg: wrong type"
 
 
 
-transNot :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transNot :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNot e =
   do l1c <- getCounter
      l2c <- getCounter
      l3c <- getCounter
      cc <- getCounter
-     ((eid, t), expStms) <- transExp e
+     resTmp <- genLocal
+     res    <- genLocal
+     ((eop, t), expStms) <- transExp e
      let l1 = LLVMLabel $ show $ "label" ++ show l1c
          l1Stm = LLVMStmLabel l1
          l2 = LLVMLabel $ show $ "label" ++ show l2c
          l2Stm = LLVMStmLabel l2
          l3 = LLVMLabel $ show $ "label" ++ show l3c
          l3Stm = LLVMStmLabel l3
+         resTmpStm = LLVMStmAssgn resTmp $ Allocate TypeBoolean
          condId = Local $ "t" ++ show cc
          condInstr = ICmp Eq
                           TypeBoolean
-                          (OI eid)
+                          eop
                           (OC ConstTrue)
          condStm = LLVMStmAssgn condId condInstr
          brStm = LLVMStmInstr $ CondBranch (OI condId) (show l1) (show l2)
          fStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstFalse)
                                       TypeBoolean
-                                      eid
+                                      resTmp
          tStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstTrue)
                                       TypeBoolean
-                                      eid
+                                      resTmp
          brStm' = LLVMStmInstr $ UncondBranch $ show l3
-     return ((eid, t), expStms ++ [condStm, brStm, l1Stm, fStm, brStm', l2Stm, tStm, l3Stm])
+         resStm = LLVMStmAssgn res $ Load TypeBoolean (OI resTmp)
+     return ((OI res, t), expStms ++ [resTmpStm,
+                                   condStm,
+                                   brStm,
+                                   l1Stm,
+                                   fStm,
+                                   brStm',
+                                   l2Stm,
+                                   tStm,
+                                   l3Stm,
+                                   resStm])
 
 
 
 
 
 
-transPostIncr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transPostIncr :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transPostIncr e =
   do ((lid, t), expStms) <- transExp e  -- TODO Check passing a pointer but a value everywhere
      c1 <- getCounter
@@ -215,7 +215,7 @@ transPostIncr e =
      let lid1 = Local $ "t" ++ show c1
          i1 = Allocate t
          s1 = LLVMStmAssgn lid1 i1
-         s2 = LLVMStmInstr $ Store t (OI lid) t lid1
+         s2 = LLVMStmInstr $ Store t lid) t lid1
 
          lid2 = Local $ "t" ++ show c2
          i3 = Add t (OI lid) (OC $ ConstInteger 1)
@@ -227,7 +227,7 @@ transPostIncr e =
 
 
 
-transPostDecr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transPostDecr :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transPostDecr e =
   do ((lid, t), expStms) <- transExp e
      c1 <- getCounter
@@ -250,7 +250,7 @@ transPostDecr e =
 
 
 
-transPreIncr  :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transPreIncr  :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transPreIncr e =
   do ((lid, t), expStms) <- transExp e
      c1 <- getCounter
@@ -268,7 +268,7 @@ transPreIncr e =
 
 
 
-transPreDecr  :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transPreDecr  :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transPreDecr e =
   do ((lid, t), expStms) <- transExp e
      c1 <- getCounter
@@ -282,7 +282,7 @@ transPreDecr e =
 
 
 
-transTimes :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transTimes :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transTimes e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -301,7 +301,7 @@ transTimes e1 e2 =
 
 
 
-transDiv :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transDiv :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transDiv e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -321,7 +321,7 @@ transDiv e1 e2 =
 
 
 
-transMod :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transMod :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transMod e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -335,7 +335,7 @@ transMod e1 e2 =
 
 
 
-transPlus :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transPlus :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transPlus e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -356,7 +356,7 @@ transPlus e1 e2 =
 
 
 
-transMinus :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transMinus :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transMinus e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -376,7 +376,7 @@ transMinus e1 e2 =
 
 
 
-emitCmp :: Exp -> Exp -> Cond -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+emitCmp :: Exp -> Exp -> Cond -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 emitCmp e1 e2 cond  =
   do l1c <- getCounter
      l2c <- getCounter
@@ -418,32 +418,32 @@ emitCmp e1 e2 cond  =
 
 -- Check if signed comparison goes
 
-transLt :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transLt :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transLt e1 e2 = emitCmp e1 e2 Slt
 
 
-transGt :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transGt :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transGt e1 e2 = emitCmp e1 e2 Sgt
 
 
-transLtEq :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transLtEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transLtEq e1 e2 = emitCmp e1 e2 Sle
 
 
-transGtEq :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transGtEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transGtEq e1 e2 = emitCmp e1 e2 Sge
 
 
-transEq :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transEq e1 e2 = emitCmp e1 e2 Eq
 
 
-transNEq :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transNEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNEq e1 e2 = emitCmp e1 e2 Ne
 
 
 
-transAnd :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transAnd :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAnd e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -454,7 +454,7 @@ transAnd e1 e2 =
 
 
 
-transOr :: Exp -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transOr :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transOr e1 e2 =
   do ((lid1, t), expStms1) <- transExp e1
      ((lid2, _), expStms2) <- transExp e2
@@ -466,7 +466,7 @@ transOr e1 e2 =
 
 
 
-transAss :: Id -> Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+transAss :: Id -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAss vid e =
   do
     (n, t) <- lookupVar vid

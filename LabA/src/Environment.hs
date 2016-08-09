@@ -131,15 +131,16 @@ lookupFun :: Id -> EnvState Env (Maybe FunType)
 lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (lookup fid fs, (ls, sc, fs, gs, t)))
 
 
-extendVar :: Id -> Identifier -> LLVMType -> EnvState Env (Identifier, LLVMType)
+extendVar :: Id -> Identifier -> LLVMType -> EnvState Env (Operand, LLVMType)
 extendVar vid lvid t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
                                  str  = scopeStr s
                                  el   = (vid, (lvid, t))
+                                 opr  = (OI lvid, t)
                                  s'   = if null str
                                         then [el] : str
                                         else (el : head str) : tail str
-                             in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
+                             in (opr, (ls, Scope s' cnt, fs, gs, tt)))
 
 extendVarDecl :: Id -> Type -> EnvState Env (Identifier, LLVMType)
 extendVarDecl vid t = EnvState (\(ls, s, fs, gs, tt) ->
