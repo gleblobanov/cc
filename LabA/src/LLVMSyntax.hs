@@ -10,26 +10,12 @@ instance Show Operand where
   show (OT t o) = show t ++ " " ++ show o
 
 
-data Identifier = IdentLocal LocalId
-                | IdentGlobal GlobalId
+data Identifier = Local String
+                | Global String
+                | EmptyId
 instance Show Identifier where
-  show (IdentLocal  lid) = show lid
-  show (IdentGlobal gid) = show gid
-getIdentStr (IdentLocal (LocalId str)) = str
-getIdentStr (IdentGlobal (GlobalId str)) = str
-
-
-
-data LocalId = LocalId String | EmptyLocalId
-instance Show LocalId where
-  show (LocalId lid)  = "%" ++ lid
-
-
-
-
-data GlobalId = GlobalId String
-instance Show GlobalId where
-  show (GlobalId gid) = "@" ++ gid
+  show (Local  lid) = "%" ++ lid
+  show (Global gid) = "@" ++ gid
 
 
 data Constant = ConstTrue
@@ -163,7 +149,7 @@ instance Show Instruction where
       EmptyInstr -> ""
       IdentInstr i -> show i
 
-data LLVMArg = LLVMArg LLVMType LocalId
+data LLVMArg = LLVMArg LLVMType Identifier
 instance Show LLVMArg where
   show (LLVMArg t aid) = show t ++ " " ++ show aid
 
@@ -171,7 +157,7 @@ data LLVMArgs = LLVMArgs [LLVMArg]
 instance Show LLVMArgs where
   show (LLVMArgs args) = intercalate ", "  $ map show args
 
-data LLVMFunction = LLVMFunction LLVMType GlobalId LLVMArgs [LLVMStm]
+data LLVMFunction = LLVMFunction LLVMType Identifier LLVMArgs [LLVMStm]
 instance Show LLVMFunction where
   show (LLVMFunction t fid args stms) =
     "define " ++ show t ++ " " ++ show fid ++ " (" ++ show args ++ ") {\n" ++

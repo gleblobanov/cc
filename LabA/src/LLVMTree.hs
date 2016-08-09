@@ -31,7 +31,7 @@ transFun :: LLVMTree -> Def -> EnvState Env LLVMTree
 transFun tree (DFun t (Id fid) args stms) =
      let t' = transType t
          args' = transArgs args
-         fun = LLVMFunction t' (GlobalId fid) args' []
+         fun = LLVMFunction t' (Global fid) args' []
      in do putType t'
            stms' <- transStms stms
            let fun' = putStmsToFun fun stms'

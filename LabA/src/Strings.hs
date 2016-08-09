@@ -39,7 +39,7 @@ findStringsExp :: GlobalStrings -> Exp -> GlobalStrings
 findStringsExp gs e
   = let strId = "str" ++ show (length gs)
     in case e of
-  (EString str) -> (str, (GlobalId strId, length str + 1)) : gs
+  (EString str) -> (str, (Global strId, length str + 1)) : gs
   (EApp _ es)  -> foldl findStringsExp gs es
   _             -> gs
 
@@ -47,7 +47,7 @@ findStringsExp gs e
 toGlobalVars :: GlobalStrings -> String
 toGlobalVars = concatMap toVar
 
-toVar :: (String, (GlobalId, Int)) -> String
-toVar (str,(GlobalId strId, strLen)) =
+toVar :: (String, (Identifier, Int)) -> String
+toVar (str,(Global strId, strLen)) =
   "@" ++ strId ++ " = internal constant [" ++ show strLen ++
   " x i8] c\"" ++ str ++ "\00\"\n"

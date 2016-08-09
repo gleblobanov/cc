@@ -29,7 +29,7 @@ instance Applicative (EnvState q) where
 
 
 
-type GlobalStrings = [(String, (GlobalId, Int))]
+type GlobalStrings = [(String, (Identifier, Int))]
 
 emptyEnv :: Env
 emptyEnv = ([], Scope [[]] 0, emptyFuns, [], TypeVoid)
@@ -40,7 +40,7 @@ getGlobalStrings (_, _, _, gs, _) = gs
 getFuns :: Env -> Funs
 getFuns (_, _, funs, _, _) = funs
 
-lookupGS :: String -> EnvState Env (Maybe (GlobalId, Int))
+lookupGS :: String -> EnvState Env (Maybe (Identifier, Int))
 lookupGS str = EnvState (\env -> let gs = getGlobalStrings env
                                  in (lookup str gs, env))
 
@@ -65,7 +65,7 @@ getScope :: EnvState Env Scope
 getScope = EnvState (\(l, s, f, g, t) -> (s, (l, s, f, g, t)))
 
 type Funs = Map Id FunType
-type FunType = (LLVMType, GlobalId, LLVMArgs)
+type FunType = (LLVMType, Identifier, LLVMArgs)
 emptyFuns :: Funs
 emptyFuns = Map.empty
 
@@ -115,7 +115,7 @@ lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (Map.lookup fid fs, (ls, sc, f
 extendVar :: Id -> Type -> EnvState Env (Identifier, LLVMType)
 extendVar vid t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
-                                 vid' = IdentLocal (LocalId ("var" ++ show cnt))
+                                 vid' = Local ("var" ++ show cnt)
                                  t'   = transType t
                                  str  = scopeStr s
                                  el   = (vid, (vid', t'))
@@ -129,7 +129,7 @@ extendFun :: Def -> EnvState Env ()
 extendFun (DFun t (Id fid) args _) =
     EnvState (\(ls, sc, fs, gs, tt) ->
                let fs'   = Map.insert (Id fid) (t' , fid', args') fs
-                   fid'  = GlobalId fid
+                   fid'  = Global fid
                    t'    = transType t
                    args' = transArgs args
                in ((), (ls, sc, fs', gs, tt)))
@@ -142,7 +142,7 @@ transArgs :: [Arg] -> LLVMArgs
 transArgs args = LLVMArgs $ map transArg args
 
 transArg :: Arg -> LLVMArg
-transArg (ADecl t (Id aid )) = LLVMArg (transType t) (LocalId aid)
+transArg (ADecl t (Id aid )) = LLVMArg (transType t) (Local aid)
 
 transType :: Type -> LLVMType
 transType t = case t of
