@@ -1,26 +1,10 @@
 module Functions where
 
-
--- compileFun :: Env -> Def -> Code
--- compileFun env (DFun _ (Id "main" ) _ stms) =
---     ".method public static main()I\n\n"
---     ++ "   .limit locals " ++ show $ getAddr env' ++ "\n"
---     ++ "   .limit stack " ++ show $ getStack env' ++ "\n"
---     ++ addReturn code Type_int
---     ++ ".end method\n\n"
---         where (code, env') = compileStms env stms
-
-
--- compileFun env (DFun t (Id id) args stms) =
---     ".method public static " ++ id ++ "(" ++ targs ++ ")" ++ t' ++"\n"
---     ++ "   .limit locals " ++ show $ getAddr env'' ++ "\n"
---     ++ "   .limit stack " ++ show $ getStack env'' ++ "\n"
---     ++ addReturn code t
---     ++ ".end method\n\n"
---         where (code, env'') = compileStms env' stms
---               t'     = typeToLetter t
---               targs  = argsToString args
---               env'   = extendArgs env args
+import AbsJL
+import LLVMSyntax
+import Environment
+import LLVMStms
+import Control.Monad
 
 
 declPrintRead :: String
@@ -30,3 +14,27 @@ declPrintRead = "declare void @printInt(i32)\n\
                 \declare i32 @readInt()\n\
                 \declare double @readDouble()\n"
 
+putStmsToFun :: LLVMFunction -> [LLVMStm] -> LLVMFunction
+putStmsToFun (LLVMFunction t fid args _) = LLVMFunction t fid args
+
+
+putFunToTree :: LLVMTree -> LLVMFunction -> EnvState Env LLVMTree
+putFunToTree tree fun =
+  EnvState (\env -> (tree ++ [fun], env))
+
+
+transFun :: LLVMTree -> Def -> EnvState Env LLVMTree
+transFun tree (DFun t (Id fid) args stms) =
+  do cnt <- getCounter
+     fns <- getFuns
+     let t' = transType t
+     putType t'
+     case lookup (Id fid) fns of
+       Just (_, _, LLVMArgs args') ->
+        do extendArgs $ zip args args'
+           stms' <- transStms stms
+           let fun = LLVMFunction t' (Global fid) (LLVMArgs args') []
+               fun' = putStmsToFun fun stms'
+           putFunToTree tree fun'
+
+       Nothing -> fail $ "Function isn't found " ++ show fid

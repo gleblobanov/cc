@@ -39,7 +39,7 @@ transDecl t (vid:vids) = do stm  <- mkDeclStm t vid
                             return (stm:stms)
 
 mkDeclStm :: Type -> Id -> EnvState Env LLVMStm
-mkDeclStm t vid = do (ident, t') <- extendVar vid t
+mkDeclStm t vid = do (ident, t') <- extendVarDecl vid t
                      let allInstr = Allocate t'
                          stm      = LLVMStmAssgn ident allInstr
                      return stm
@@ -60,10 +60,10 @@ mkInitStms t (vid:vids) tmp = do stms     <- mkInitStm t vid tmp
                                  return (stms ++ stmsRest)
 
 mkInitStm :: Type -> Id -> Identifier -> EnvState Env [LLVMStm]
-mkInitStm t vid tmp = do (identPtr, t') <- extendVar vid t
+mkInitStm t vid tmp = do (identPtr, t') <- extendVarDecl vid t
                          let allInstr = Allocate t'
                              sAlloc   = LLVMStmAssgn identPtr allInstr
-                             tPtr'    = typeToPtr t'
+                             tPtr'    = t'
                              sStore   = LLVMStmInstr (Store t' (OI tmp) tPtr' identPtr)
                          return [sAlloc, sStore]
 
@@ -74,7 +74,6 @@ transSReturn :: ReturnRest ->  EnvState Env [LLVMStm]
 transSReturn rest = case rest of
   ReturnRest e -> do ((vid, _), expStms) <- transExp e
                      t <- getType
-                     cnt <- getCounter
                      let retStm = LLVMStmInstr (Return t (OI vid))
                      return $ expStms ++ [retStm]
   ReturnRestEmpt -> return [LLVMStmInstr ReturnVoid]

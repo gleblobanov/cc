@@ -1,7 +1,7 @@
 module Environment where
 
 import qualified Data.Map as Map
-import Data.Map (Map)
+import Data.List
 --import LLVMTree
 
 import LLVMTypes
@@ -37,8 +37,14 @@ emptyEnv = ([], Scope [[]] 0, emptyFuns, [], TypeVoid)
 getGlobalStrings :: Env -> GlobalStrings
 getGlobalStrings (_, _, _, gs, _) = gs
 
-getFuns :: Env -> Funs
-getFuns (_, _, funs, _, _) = funs
+-- getFuns :: Env -> Funs
+-- getFuns (_, _, funs, _, _) = funs
+
+-- TODO replace everywhere
+genLocal :: EnvState Env Identifier
+genLocal = do cnt <- getCounter
+              return $ Local $ "t" ++ show cnt
+
 
 lookupGS :: String -> EnvState Env (Maybe (Identifier, Int))
 lookupGS str = EnvState (\env -> let gs = getGlobalStrings env
@@ -50,6 +56,7 @@ getCounter = EnvState (\(l, Scope st cnt, f, g, t) -> (cnt+1, (l, Scope st (cnt+
 type Storage = [[(Id, (Identifier, LLVMType))]]
 
 data Scope = Scope Storage Integer
+     deriving Show
 emptyScope :: Scope
 emptyScope = Scope [] 0
 scopeStr (Scope str _) = str
@@ -64,10 +71,17 @@ getType = EnvState (\(l, s, f, g, t) -> (t, (l, s, f, g, t)))
 getScope :: EnvState Env Scope
 getScope = EnvState (\(l, s, f, g, t) -> (s, (l, s, f, g, t)))
 
-type Funs = Map Id FunType
-type FunType = (LLVMType, Identifier, LLVMArgs)
+getFuns :: EnvState Env Funs
+getFuns = EnvState (\(l, s, f, g, t) -> (f, (l, s, f, g, t)))
+
+putFuns :: Funs -> EnvState Env ()
+putFuns f = EnvState (\(l, s, _, g, t) -> ((), (l, s, f, g, t)))
+
+
+type Funs = [(Id, FunType)]
+type FunType = (LLVMType, Identifier,  LLVMArgs)
 emptyFuns :: Funs
-emptyFuns = Map.empty
+emptyFuns = []
 
 
 data EnvState e a = EnvState (e -> (a, e))
@@ -96,10 +110,15 @@ newLabel :: LLVMLabel -> EnvState Env LLVMLabel
 newLabel l = EnvState (\(ls, sc, fs, gs, t) -> (l, (l:ls, sc, fs, gs, t)))
 
 
-lookupVar :: Id -> EnvState Env (Maybe (Identifier, LLVMType))
-lookupVar vid = EnvState (\(ls, sc, fs, gs, t) -> let str  = scopeStr sc
-                                                      res = lookup' vid str
-                                                  in (res, (ls, sc, fs, gs, t)))
+lookupVar :: Id -> EnvState Env (Identifier, LLVMType)
+lookupVar vid = do sc <- getScope
+                   env <- get
+                   let str = scopeStr sc
+                       res = lookup' vid str
+                   case res of
+                     Just (lid, t) -> return (lid, t)
+                     Nothing -> fail $ "Variable isn't found " ++ show vid ++ "\n" ++ show env
+
 
 lookup' :: Eq a => a -> [[(a,b)]] -> Maybe b
 lookup' _ []     = Nothing
@@ -109,11 +128,21 @@ lookup' a (m:ms) = case lookup a m of
 
 
 lookupFun :: Id -> EnvState Env (Maybe FunType)
-lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (Map.lookup fid fs, (ls, sc, fs, gs, t)))
+lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (lookup fid fs, (ls, sc, fs, gs, t)))
 
 
-extendVar :: Id -> Type -> EnvState Env (Identifier, LLVMType)
-extendVar vid t = EnvState (\(ls, s, fs, gs, tt) ->
+extendVar :: Id -> Identifier -> LLVMType -> EnvState Env (Identifier, LLVMType)
+extendVar vid lvid t = EnvState (\(ls, s, fs, gs, tt) ->
+                             let cnt  = scopeCnt s + 1
+                                 str  = scopeStr s
+                                 el   = (vid, (lvid, t))
+                                 s'   = if null str
+                                        then [el] : str
+                                        else (el : head str) : tail str
+                             in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
+
+extendVarDecl :: Id -> Type -> EnvState Env (Identifier, LLVMType)
+extendVarDecl vid t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
                                  vid' = Local ("var" ++ show cnt)
                                  t'   = transType t
@@ -125,24 +154,29 @@ extendVar vid t = EnvState (\(ls, s, fs, gs, tt) ->
                              in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
 
 
+
+
 extendFun :: Def -> EnvState Env ()
 extendFun (DFun t (Id fid) args _) =
-    EnvState (\(ls, sc, fs, gs, tt) ->
-               let fs'   = Map.insert (Id fid) (t' , fid', args') fs
-                   fid'  = Global fid
-                   t'    = transType t
-                   args' = transArgs args
-               in ((), (ls, sc, fs', gs, tt)))
+  do fs  <- getFuns
+     cnt <- getCounter
+     let fs'   = (Id fid, (t', fid', args')) : fs
+         fid'  = Global fid
+         t'    = transType t
+         args' = transArgs args cnt
+     putFuns fs'
 
-extendArgs :: [Arg] -> EnvState Env ()
-extendArgs = foldr ((>>). (\(ADecl t aid ) -> extendVar aid t)) (return ())
+extendArgs :: [(Arg, LLVMArg)] -> EnvState Env ()
+extendArgs = foldr ((>>). (\(ADecl _ aid, LLVMArg t laid) ->
+                            extendVar aid laid t)) (return ())
+
+transArgs :: [Arg] -> Integer -> LLVMArgs
+transArgs args cnt = LLVMArgs $ map (transArg cnt) args
+
+transArg :: Integer -> Arg -> LLVMArg
+transArg cnt (ADecl t (Id aid )) = LLVMArg (transType t) (Local (aid ++ show cnt))
 
 
-transArgs :: [Arg] -> LLVMArgs
-transArgs args = LLVMArgs $ map transArg args
-
-transArg :: Arg -> LLVMArg
-transArg (ADecl t (Id aid )) = LLVMArg (transType t) (Local aid)
 
 transType :: Type -> LLVMType
 transType t = case t of

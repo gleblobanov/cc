@@ -3,6 +3,9 @@ module LLVMSyntax where
 import Data.List
 import LLVMTypes
 
+
+
+
 data Operand = OI Identifier | OC Constant | OT LLVMType Operand
 instance Show Operand where
   show (OI i)   = show i
@@ -68,9 +71,9 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
                  | Or  LLVMType Operand Operand
 
                  | Allocate LLVMType
-                 | GetElementPtr LLVMTypePtr Operand Operand Operand
-                 | Store LLVMType Operand LLVMTypePtr Identifier
-                 | Load  LLVMTypePtr Operand
+                 | GetElementPtr LLVMType Operand Operand Operand
+                 | Store LLVMType Operand LLVMType Identifier
+                 | Load  LLVMType Operand
 
                  | ICmp Cond LLVMType Operand Operand
                  | FCmp Cond LLVMType Operand Operand
@@ -113,7 +116,7 @@ instance Show Instruction where
                                    ++  ", " ++ show o3
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
-        show tp ++ " " ++ show o2
+        show (TypePtr tp) ++ " " ++ show o2
       Load t o ->
         "load " ++ show t ++ " " ++ show o
       ICmp c t o1 o2 ->
@@ -142,7 +145,7 @@ instance Show Instruction where
       UncondBranch l ->
         "br "    ++
         "label " ++
-        show l
+        l
 
       ConstInstr const -> show const
 
@@ -156,6 +159,9 @@ instance Show LLVMArg where
 data LLVMArgs = LLVMArgs [LLVMArg]
 instance Show LLVMArgs where
   show (LLVMArgs args) = intercalate ", "  $ map show args
+
+
+type LLVMTree = [LLVMFunction]
 
 data LLVMFunction = LLVMFunction LLVMType Identifier LLVMArgs [LLVMStm]
 instance Show LLVMFunction where
