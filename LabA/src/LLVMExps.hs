@@ -1,5 +1,5 @@
 module LLVMExps where
-
+ 
 import AbsJL
 import LLVMSyntax
 import Environment
@@ -12,20 +12,19 @@ transExp exp =   case exp of
  EString s    -> transString s
  EInt i       -> transInteger i
  EDouble d    -> transDouble d
-
  EId id       -> transId id
  EApp fid es  -> transApp fid es
  ENeg e       -> transNeg e
  ENot e       -> transNot e
- EPostIncr e  -> transPostIncr e
- EPostDecr e  -> transPostDecr e
- EPreIncr e   -> transPreIncr e
- EPreDecr e   -> transPreDecr e
- ETimes e1 e2  -> transTimes e1 e2
- EDiv e1 e2    -> transDiv e1 e2
- EMod e1 e2    -> transMod e1 e2
- EPlus e1 e2   -> transPlus e1 e2
- EMinus e1 e2  -> transMinus e1 e2
+ EPostIncr e  -> transIncr e Incr Post
+ EPostDecr e  -> transIncr e Decr Post
+ EPreIncr e   -> transIncr e Incr Pre
+ EPreDecr e   -> transIncr e Decr Pre
+ ETimes e1 e2  -> transAr e1 e2 ArTimes
+ EDiv e1 e2    -> transAr e1 e2 ArDiv
+ EMod e1 e2    -> transAr e1 e2 ArMod
+ EPlus e1 e2   -> transAr e1 e2 ArPlus
+ EMinus e1 e2  -> transAr e1 e2 ArMinus
  ELt e1 e2     -> transLt e1 e2
  EGt e1 e2     -> transGt e1 e2
  ELtEq e1 e2   -> transLtEq e1 e2
@@ -35,7 +34,6 @@ transExp exp =   case exp of
  EAnd e1 e2    -> transAnd e1 e2
  EOr e1 e2     -> transOr e1 e2
  EAss (EId vid) e -> transAss vid e
- _                -> return ((EmptyId, TypeVoid), [])
 
 
 
@@ -67,7 +65,7 @@ transString s = do cnt <- getCounter
                    env <- get
                    let gs = getGlobalStrings env
                    case lookup s gs of
-                     Just (gid, len) -> do let ta = TypeArray len TypeChar
+                     Just (gid, len) -> do let ta = TypePtr $ TypeArray len TypeChar
                                                o  = OI gid
                                                o' = OT TypeInteger (OC (ConstInteger 0))
                                                inst = GetElementPtr ta o o' o'
@@ -84,52 +82,76 @@ transString s = do cnt <- getCounter
 -}
 
 
+transIdPtr :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transIdPtr vid = do (ptr, typ) <- lookupVar vid
+                    return ((ptr, typ), [])
 
 
 transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transId vid = do res <- lookupVar vid
-                 return (res, [])
+transId vid = do (ptr, typ) <- lookupVar vid
+                 val <- genLocal
+                 let s = LLVMStmAssgn val $ Load typ ptr
+                 return ((OI val, typ), [s])
 
+
+-- transExpPtr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
+-- transExpPtr (EId vid) = do (OI ptr, typ) <- lookupVar vid
+--                            return ((ptr, typ), [])
 
 
 
 transApp :: Id -> [Exp] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transApp (Id "printString") [EString s] =
-  do ((OI lid, t), stms) <- transString s
-     res <- genLocal
-     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printString")
-                    (LLVMArgs [LLVMArg (TypePtr TypeChar) lid])
-     return ((OI res, t), stms ++ [call])
+  do ((val, t), stms) <- transString s
+     let call = LLVMStmInstr $ Call TypeVoid (Global "printString")
+                    (LLVMArgs [LLVMArg (TypePtr TypeChar) val])
+     return ((val, t), stms ++ [call])
 
 transApp (Id "printInt") [e] =
-  do ((OI lid, t), stms) <- transExp e
-     res <- genLocal
-     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printInt")
-                    (LLVMArgs [LLVMArg (TypePtr TypeInteger) lid])
-     return ((OI res, t), stms ++ [call])
+  do ((val, typ), stms) <- transExp e
+     let call = LLVMStmInstr $ Call TypeVoid (Global "printInt")
+                    (LLVMArgs [LLVMArg typ val])
+     return ((val, typ), stms ++ [call])
 
 transApp (Id "printDouble") [e] =
-  do ((OI lid, t), stms) <- transExp e
-     res <- genLocal
-     let call = LLVMStmAssgn res $ Call TypeVoid (Global "printDouble")
-                    (LLVMArgs [LLVMArg (TypePtr TypeDouble) lid])
-     return ((OI res, t), stms ++ [call])
+  do ((val, typ), stms) <- transExp e
+     let call = LLVMStmInstr $ Call TypeVoid (Global "printDouble")
+                    (LLVMArgs [LLVMArg typ val])
+     return ((val, typ), stms ++ [call])
+
+transApp (Id "readInt") _ =
+  do val <- genLocal
+     let call = LLVMStmAssgn val $ Call TypeInteger (Global "readInt")
+                    (LLVMArgs [])
+     return ((OI val, TypeInteger), [call])
+
+
+transApp (Id "readDouble") _ =
+  do val <- genLocal
+     let call = LLVMStmAssgn val $ Call TypeDouble (Global "readDouble")
+                    (LLVMArgs [])
+     return ((OI val, TypeDouble), [call])
+
+
 
 transApp fid args = do executedArgsStms <- execArgs args
                        res <- genLocal
                        funs <- getFuns
-                       let executedArgs =map fst executedArgsStms
+                       let executedArgs = map fst executedArgsStms
                            executedSS   = concatMap snd executedArgsStms
-                           llvmArgs = LLVMArgs $ map ((\(ident, typ) -> LLVMArg typ ident) .
-                                                      (\(OI i, t) -> (i, t))) executedArgs
+                           llvmArgs = LLVMArgs $ map (\(val, typ) -> LLVMArg typ val)
+                                                     executedArgs
                        case lookup fid funs of
                          Just (ftyp, fid', _) ->
-                          let stm = LLVMStmAssgn res $ Call ftyp fid' llvmArgs
+                          let stm = case ftyp of
+                                TypeVoid -> LLVMStmInstr $ Call ftyp fid' llvmArgs
+                                _ -> LLVMStmAssgn res $ Call ftyp fid' llvmArgs
                           in return ((OI res, ftyp), executedSS ++ [stm])
                          Nothing -> fail $ "Function isn't found. " ++ show fid
 
 execArgs :: [Exp] -> EnvState Env [((Operand, LLVMType), [LLVMStm])]
 execArgs = mapM transExp
+
 
 
 emitOperation :: Instruction -> EnvState Env (Operand, [LLVMStm])
@@ -167,11 +189,11 @@ transNot e =
      resTmp <- genLocal
      res    <- genLocal
      ((eop, t), expStms) <- transExp e
-     let l1 = LLVMLabel $ show $ "label" ++ show l1c
+     let l1 = LLVMLabel $ "lab" ++ show l1c
          l1Stm = LLVMStmLabel l1
-         l2 = LLVMLabel $ show $ "label" ++ show l2c
+         l2 = LLVMLabel $ "lab" ++ show l2c
          l2Stm = LLVMStmLabel l2
-         l3 = LLVMLabel $ show $ "label" ++ show l3c
+         l3 = LLVMLabel $ "lab" ++ show l3c
          l3Stm = LLVMStmLabel l3
          resTmpStm = LLVMStmAssgn resTmp $ Allocate TypeBoolean
          condId = Local $ "t" ++ show cc
@@ -199,180 +221,56 @@ transNot e =
                                    brStm',
                                    l2Stm,
                                    tStm,
+                                   brStm',
                                    l3Stm,
                                    resStm])
 
 
 
 
-
-
-transPostIncr :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transPostIncr e =
-  do ((lid, t), expStms) <- transExp e  -- TODO Check passing a pointer but a value everywhere
-     c1 <- getCounter
-     c2 <- getCounter
-     let lid1 = Local $ "t" ++ show c1
-         i1 = Allocate t
-         s1 = LLVMStmAssgn lid1 i1
-         s2 = LLVMStmInstr $ Store t lid) t lid1
-
-         lid2 = Local $ "t" ++ show c2
-         i3 = Add t (OI lid) (OC $ ConstInteger 1)
-         s3 = LLVMStmAssgn lid2 i3
-         s4 = LLVMStmInstr $ Store t (OI lid2) t lid
-     return ((lid1, t), expStms ++ [s1, s2, s3, s4])
+data IncrDecr = Incr | Decr
+data PostPre = Post | Pre
 
 
 
-
-
-transPostDecr :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transPostDecr e =
-  do ((lid, t), expStms) <- transExp e
-     c1 <- getCounter
-     c2 <- getCounter
-     let lid1 = Local $ "t" ++ show c1
-         i1 = Allocate t
-         s1 = LLVMStmAssgn lid1 i1
-         s2 = LLVMStmInstr $ Store t (OI lid) t lid1
-
-         lid2 = Local $ "t" ++ show c2
-         i3 = Sub t (OI lid) (OC $ ConstInteger 1)
-         s3 = LLVMStmAssgn lid2 i3
-         s4 = LLVMStmInstr $ Store t (OI lid2) t lid
-     return ((lid1, t), expStms ++ [s1, s2, s3, s4])
-
+transIncr :: Exp -> IncrDecr -> PostPre -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transIncr (EId vid) incrDecr postPre =
+  do ((OI ptr, typ), expStms) <- transIdPtr vid
+     val1 <- genLocal
+     val2 <- genLocal
+     let s1 = LLVMStmAssgn val1 $ Load typ (OI ptr)
+         i2 = case incrDecr of
+           Incr -> Add typ (OI val1) (OC $ ConstInteger 1)
+           Decr -> Sub typ (OI val1) (OC $ ConstInteger 1)
+         s2 = LLVMStmAssgn val2 i2
+         s3 = LLVMStmInstr $ Store typ (OI val2) typ ptr
+         res = case postPre of
+           Post -> val1
+           Pre  -> val2
+     return ((OI res, typ), expStms ++ [s1, s2, s3])
 
 
 
+data Ar = ArTimes | ArDiv | ArMod | ArPlus | ArMinus
 
-
-
-
-transPreIncr  :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transPreIncr e =
-  do ((lid, t), expStms) <- transExp e
-     c1 <- getCounter
-     let lid1 = Local $ "t" ++ show c1
-         i1 = Add t (OI lid) (OC $ ConstInteger 1)
-         s1 = LLVMStmAssgn lid1 i1
-         s2 = LLVMStmInstr $ Store t (OI lid1) t lid
-     return ((lid, t), expStms ++ [s1, s2])
-
-
-
-
-
-
-
-
-
-transPreDecr  :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transPreDecr e =
-  do ((lid, t), expStms) <- transExp e
-     c1 <- getCounter
-     let lid1 = Local $ "t" ++ show c1
-         i1 = Sub t (OI lid) (OC $ ConstInteger 1)
-         s1 = LLVMStmAssgn lid1 i1
-         s2 = LLVMStmInstr $ Store t (OI lid1) t lid
-     return ((lid, t), expStms ++ [s1, s2])
-
-
-
-
-
-transTimes :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transTimes e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     case t of
-       TypeInteger -> do (lid', stms) <- emitOperation $ Mul TypeInteger
-                                                             (OI lid1)
-                                                             (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       TypeDouble  -> do (lid', stms) <- emitOperation $ FMul TypeDouble
-                                                              (OI lid1)
-                                                              (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       _           -> fail "transTimes: wrong type"
-
-
-
-
-
-transDiv :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transDiv e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     case t of
-       TypeInteger -> do (lid', stms) <- emitOperation $ SDiv TypeInteger
-                                                             (OI lid1)
-                                                             (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       TypeDouble  -> do (lid', stms) <- emitOperation $ FDiv TypeDouble
-                                                              (OI lid1)
-                                                              (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       _           -> fail "transDiv: wrong type"
-
-
-
-
-
-
-transMod :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transMod e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     (lid', stms) <- emitOperation $ SRem TypeInteger
-                                         (OI lid1)
-                                         (OI lid2)
-     return ((lid', t), expStms1 ++ expStms2 ++ stms)
-
-
-
-
-
-
-transPlus :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transPlus e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     case t of
-       TypeInteger -> do (lid', stms) <- emitOperation $ Add TypeInteger
-                                                             (OI lid1)
-                                                             (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       TypeDouble  -> do (lid', stms) <- emitOperation $ FAdd TypeDouble
-                                                              (OI lid1)
-                                                              (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       _           -> fail "transAdd: wrong type"
-
-
-
-
-
-
-
-transMinus :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transMinus e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     case t of
-       TypeInteger -> do (lid', stms) <- emitOperation $ Sub TypeInteger
-                                                             (OI lid1)
-                                                             (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       TypeDouble  -> do (lid', stms) <- emitOperation $ FSub TypeDouble
-                                                              (OI lid1)
-                                                              (OI lid2)
-                         return ((lid', t), expStms1 ++ expStms2 ++ stms)
-       _           -> fail "transSub: wrong type"
-
-
-
+transAr :: Exp -> Exp -> Ar -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAr e1 e2 ar =
+  do ((val1, typ), ss1) <- transExp e1
+     ((val2, _),   ss2) <- transExp e2
+     (res, ss)          <- emitOperation $
+       case typ of
+         TypeInteger -> case ar of
+           ArTimes -> Mul  typ val1 val2
+           ArDiv   -> SDiv typ val1 val2
+           ArMod   -> SRem typ val1 val2
+           ArPlus  -> Add  typ val1 val2
+           ArMinus -> Sub  typ val1 val2
+         TypeDouble -> case ar of
+           ArTimes -> FMul typ val1 val2
+           ArDiv   -> FDiv typ val1 val2
+           ArPlus  -> FAdd typ val1 val2
+           ArMinus -> FSub typ val1 val2
+     return ((res, typ), ss1 ++ ss2 ++ ss)
 
 
 
@@ -382,35 +280,38 @@ emitCmp e1 e2 cond  =
      l2c <- getCounter
      l3c <- getCounter
      cc  <- getCounter
-     cr  <- getCounter
+     crt <- getCounter
+     res <- genLocal
      ((eid1, t), expStms1) <- transExp e1
      ((eid2, _), expStms2) <- transExp e2
-     let l1 = LLVMLabel $ show $ "label" ++ show l1c
+     let l1 = LLVMLabel $ "lab" ++ show l1c
          l1Stm = LLVMStmLabel l1
-         l2 = LLVMLabel $ show $ "label" ++ show l2c
+         l2 = LLVMLabel $ "lab" ++ show l2c
          l2Stm = LLVMStmLabel l2
-         l3 = LLVMLabel $ show $ "label" ++ show l3c
+         l3 = LLVMLabel $ "lab" ++ show l3c
          l3Stm = LLVMStmLabel l3
-         res = Local $ "t" ++ show cr
+         resTmp = Local $ "t" ++ show crt
          i1 = Allocate TypeBoolean
-         resStm = LLVMStmAssgn res i1
+         resTmpStm = LLVMStmAssgn resTmp i1
          condId = Local $ "t" ++ show cc
-         condInstr = ICmp cond
-                          TypeBoolean
-                          (OI eid1)
-                          (OI eid2)
+         condInstr = case t of
+           TypeInteger -> ICmp cond t eid1 eid2
+           TypeBoolean -> ICmp cond t eid1 eid2
+           TypeDouble  -> FCmp (toOrderedCond cond) t eid1 eid2
          condStm = LLVMStmAssgn condId condInstr
          brStm = LLVMStmInstr $ CondBranch (OI condId) (show l1) (show l2)
-         fStm =  LLVMStmInstr $ Store TypeBoolean
+
+         tStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstTrue)
                                       TypeBoolean
-                                      res
-         tStm =  LLVMStmInstr $ Store TypeBoolean
+                                      resTmp
+         fStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstFalse)
                                       TypeBoolean
-                                      res
+                                      resTmp
          brStm' = LLVMStmInstr $ UncondBranch $ show l3
-     return ((res, TypeBoolean), expStms1 ++ expStms2 ++ [resStm, condStm, brStm, l1Stm, fStm, brStm', l2Stm, tStm, l3Stm])
+         resStm = LLVMStmAssgn res $ Load TypeBoolean $ OI resTmp
+     return ((OI res, TypeBoolean), expStms1 ++ expStms2 ++ [resTmpStm, condStm, brStm, l1Stm, tStm, brStm', l2Stm, fStm, brStm', l3Stm, resStm])
 
 
 
@@ -442,40 +343,85 @@ transNEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNEq e1 e2 = emitCmp e1 e2 Ne
 
 
+data AO = AOOr | AOAnd
 
-transAnd :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transAnd e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     (lid', stms) <- emitOperation $ And TypeBoolean
-                                         (OI lid1)
-                                         (OI lid2)
-     return ((lid', t), expStms1 ++ expStms2 ++ stms)
+transAndOr :: Exp -> Exp -> AO -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAndOr e1 e2 ao =
+  do ((val1, t), expStms1) <- transExp e1
+     ((val2, _), expStms2) <- transExp e2
+     c1 <- getCounter
+     c2 <- getCounter
+     c3 <- getCounter
+     ptr <- genLocal
+     tmp <- genLocal
+     res <- genLocal
+     let l1  = LLVMLabel $ "lab" ++ show c1
+         sl1 = LLVMStmLabel l1
+         l2  = LLVMLabel $ "lab" ++ show c2
+         sl2 = LLVMStmLabel l2
+         l3  = LLVMLabel $ "lab" ++ show c3
+         sl3 = LLVMStmLabel l3
+         allStm    = LLVMStmAssgn ptr $ Allocate TypeBoolean
+         condStm   = LLVMStmInstr (CondBranch val1 (show l1) (show l2))
+         uncondStm = LLVMStmInstr (UncondBranch (show l3))
+         oper      = LLVMStmAssgn tmp $ case ao of
+           AOAnd -> And TypeBoolean val1 val2
+           AOOr  -> Or TypeBoolean val1 val2
+         storeTmpStm    = LLVMStmInstr $ Store TypeBoolean (OI tmp) TypeBoolean ptr
+         storeInpStm    = LLVMStmInstr $ Store TypeBoolean val1 TypeBoolean ptr
+         loadResStm   = LLVMStmAssgn res $ Load TypeBoolean $ OI ptr
+         resStms = case ao of
+           AOAnd ->
+             expStms1      ++
+             [allStm]      ++
+             [condStm]     ++
+             [sl1]         ++
+             expStms2      ++
+             [oper]        ++
+             [storeTmpStm] ++
+             [uncondStm]   ++
+             [sl2]         ++
+             [storeInpStm] ++
+             [uncondStm]   ++
+             [sl3]         ++
+             [loadResStm]
+           AOOr  ->
+             expStms1      ++
+             [allStm]      ++
+             [condStm]     ++
+             [sl1]         ++
+             [storeInpStm] ++
+             [uncondStm]   ++
+             [sl2]         ++
+             expStms2      ++
+             [oper]        ++
+             [storeTmpStm] ++
+             [uncondStm]   ++
+             [sl3]         ++
+             [loadResStm]
+
+     return ((OI res, t), resStms)
 
 
 
 transOr :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transOr e1 e2 =
-  do ((lid1, t), expStms1) <- transExp e1
-     ((lid2, _), expStms2) <- transExp e2
-     (lid', stms) <- emitOperation $ Or TypeBoolean
-                                         (OI lid1)
-                                         (OI lid2)
-     return ((lid', t), expStms1 ++ expStms2 ++ stms)
+transOr e1 e2 = transAndOr e1 e2 AOOr
 
 
+transAnd :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAnd e1 e2 = transAndOr e1 e2 AOAnd
 
 
 transAss :: Id -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAss vid e =
   do
-    (n, t) <- lookupVar vid
-    ((lid, _), expStms) <- transExp e
-    let s = LLVMStmInstr $ Store t
-            (OI lid)
-            t
-            n
-    return ((n, t), expStms ++ [s])
+    (OI ref, typ) <- lookupVar vid
+    ((val, _), expStms) <- transExp e
+    let s = LLVMStmInstr $ Store typ
+            val
+            typ
+            ref
+    return ((val, typ), expStms ++ [s])
 
 
 

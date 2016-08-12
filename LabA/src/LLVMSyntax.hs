@@ -6,7 +6,7 @@ import LLVMTypes
 
 
 
-data Operand = OI Identifier | OC Constant | OT LLVMType Operand
+data Operand = OI Identifier | OC Constant | OT LLVMType Operand | ON
 instance Show Operand where
   show (OI i)   = show i
   show (OC c)   = show c
@@ -42,6 +42,14 @@ data Cond = Eq  -- equal
           | Sge -- signed greater or equal
           | Slt -- signed less than
           | Sle -- signed less or equal
+          | Oeq  -- equal
+          | One  -- not equal
+          | Ogt -- unsigned greater than
+          | Oge -- unsigned greater or equal
+          | Olt -- unsigned less than
+          | Ole -- unsigned less or equal
+
+
 instance Show Cond where
   show c = case c of
     Eq  -> "eq"
@@ -54,6 +62,28 @@ instance Show Cond where
     Sge -> "sge"
     Slt -> "slt"
     Sle -> "sle"
+    Oeq -> "oeq"
+    One -> "one"
+    Ogt -> "ogt"
+    Oge -> "oge"
+    Olt -> "olt"
+    Ole -> "ole"
+
+
+
+
+toOrderedCond :: Cond -> Cond
+toOrderedCond c = case c of
+    Eq  -> Oeq
+    Ne  -> One
+    Ugt -> Ogt
+    Uge -> Oge
+    Ult -> Olt
+    Ule -> Ole
+    Sgt -> Ogt
+    Sge -> Oge
+    Slt -> Olt
+    Sle -> Ole
 
 
 
@@ -101,7 +131,7 @@ instance Show Instruction where
       FMul t o1 o2 -> "fmul " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       Add  t o1 o2 -> "add "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FAdd t o1 o2 -> "fadd " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
-      SDiv t o1 o2 -> "div "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
+      SDiv t o1 o2 -> "sdiv "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FDiv t o1 o2 -> "fdiv " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       SRem t o1 o2 -> "srem " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       Sub  t o1 o2 -> "sub "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
@@ -117,8 +147,8 @@ instance Show Instruction where
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
         show (TypePtr tp) ++ " " ++ show o2
-      Load t o ->
-        "load " ++ show t ++ " " ++ show o
+      Load tp o ->
+        "load " ++ show (TypePtr tp) ++ " " ++ show o
       ICmp c t o1 o2 ->
         "icmp " ++ show c ++ " " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FCmp c t o1 o2 ->
@@ -137,14 +167,14 @@ instance Show Instruction where
       ReturnVoid -> "ret void\n"
 
       CondBranch o l1 l2 ->
-        "br i1" ++
+        "br i1 " ++
         show o ++ ", " ++
-        "label " ++ l1 ++ ", " ++
-        "label " ++ l2
+        "label %" ++ l1 ++ ", " ++
+        "label %" ++ l2
 
       UncondBranch l ->
         "br "    ++
-        "label " ++
+        "label %" ++
         l
 
       ConstInstr const -> show const
@@ -152,7 +182,7 @@ instance Show Instruction where
       EmptyInstr -> ""
       IdentInstr i -> show i
 
-data LLVMArg = LLVMArg LLVMType Identifier
+data LLVMArg = LLVMArg LLVMType Operand
 instance Show LLVMArg where
   show (LLVMArg t aid) = show t ++ " " ++ show aid
 

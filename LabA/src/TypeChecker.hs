@@ -110,7 +110,8 @@ typecheck (PDefs defs) =
               (Id "printInt", ([Type_int], Type_void)),
               (Id "printDouble", ([Type_double], Type_void)),
               (Id "printString", ([Type_string], Type_void)),
-              (Id "readInt", ([], Type_int))
+              (Id "readInt", ([], Type_int)),
+              (Id "readDouble", ([], Type_double))
              ]
 
           globalenv <- foldM

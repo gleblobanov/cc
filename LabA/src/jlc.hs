@@ -2,6 +2,7 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
 import System.Process
+import System.FilePath
 
 import AbsJL
 import LexJL
@@ -17,14 +18,14 @@ typeCheck :: String -> IO Program
 typeCheck s = case pProgram (myLexer s) of
   Bad err  -> do
     hPutStrLn stderr "ERROR"
-    -- putStrLn err
-    fail "Typecheck Error"
+    return $ PDefs []
   Ok tree -> case typecheck tree of
     Bad err -> do
       hPutStrLn stderr "ERROR"
-      fail "Typecheck Error"
-    Ok _ -> return tree
-
+      return $ PDefs []
+    Ok _ -> do
+      hPutStrLn stderr "OK"
+      return tree
 
 main :: IO ()
 main = do
@@ -33,8 +34,16 @@ main = do
     [file] -> do content <- readFile file
                  program <- typeCheck content
                  let code = generateCode program
-                 writeFile progLL code
-                 build
+                     bn   = dropExtension file
+                 writeFile (bn ++ ".ll") code
+                 link bn
+    ["-b", file] -> do content <- readFile file
+                       program <- typeCheck content
+                       let code = generateCode program
+                           bn   = dropExtension file
+                       writeFile (bn ++ ".ll") code
+                       build bn
+
     _      -> do
       putStrLn "Usage: lab2 <SourceFile>"
       exitFailure

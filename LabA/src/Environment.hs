@@ -53,7 +53,7 @@ lookupGS str = EnvState (\env -> let gs = getGlobalStrings env
 getCounter :: EnvState Env Integer
 getCounter = EnvState (\(l, Scope st cnt, f, g, t) -> (cnt+1, (l, Scope st (cnt+1), f, g, t)))
 
-type Storage = [[(Id, (Identifier, LLVMType))]]
+type Storage = [[(Id, (Operand, LLVMType))]]
 
 data Scope = Scope Storage Integer
      deriving Show
@@ -110,7 +110,7 @@ newLabel :: LLVMLabel -> EnvState Env LLVMLabel
 newLabel l = EnvState (\(ls, sc, fs, gs, t) -> (l, (l:ls, sc, fs, gs, t)))
 
 
-lookupVar :: Id -> EnvState Env (Identifier, LLVMType)
+lookupVar :: Id -> EnvState Env (Operand, LLVMType)
 lookupVar vid = do sc <- getScope
                    env <- get
                    let str = scopeStr sc
@@ -131,21 +131,21 @@ lookupFun :: Id -> EnvState Env (Maybe FunType)
 lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (lookup fid fs, (ls, sc, fs, gs, t)))
 
 
-extendVar :: Id -> Identifier -> LLVMType -> EnvState Env (Operand, LLVMType)
-extendVar vid lvid t = EnvState (\(ls, s, fs, gs, tt) ->
+extendVar :: Id -> Operand -> LLVMType -> EnvState Env (Operand, LLVMType)
+extendVar vid val t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
                                  str  = scopeStr s
-                                 el   = (vid, (lvid, t))
-                                 opr  = (OI lvid, t)
+                                 el   = (vid, (val, t))
+                                 opr  = (val, t)
                                  s'   = if null str
                                         then [el] : str
                                         else (el : head str) : tail str
                              in (opr, (ls, Scope s' cnt, fs, gs, tt)))
 
-extendVarDecl :: Id -> Type -> EnvState Env (Identifier, LLVMType)
+extendVarDecl :: Id -> Type -> EnvState Env (Operand, LLVMType)
 extendVarDecl vid t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
-                                 vid' = Local ("var" ++ show cnt)
+                                 vid' = OI $ Local ("var" ++ show cnt)
                                  t'   = transType t
                                  str  = scopeStr s
                                  el   = (vid, (vid', t'))
@@ -167,15 +167,11 @@ extendFun (DFun t (Id fid) args _) =
          args' = transArgs args cnt
      putFuns fs'
 
-extendArgs :: [(Arg, LLVMArg)] -> EnvState Env ()
-extendArgs = foldr ((>>). (\(ADecl _ aid, LLVMArg t laid) ->
-                            extendVar aid laid t)) (return ())
-
 transArgs :: [Arg] -> Integer -> LLVMArgs
 transArgs args cnt = LLVMArgs $ map (transArg cnt) args
 
 transArg :: Integer -> Arg -> LLVMArg
-transArg cnt (ADecl t (Id aid )) = LLVMArg (transType t) (Local (aid ++ show cnt))
+transArg cnt (ADecl t (Id aid )) = LLVMArg (transType t) (OI $ Local (aid ++ show cnt))
 
 
 
@@ -184,7 +180,7 @@ transType t = case t of
   Type_true       -> TypeBoolean
   Type_false      -> TypeBoolean
   Type_bool_undef -> TypeBoolean
-  Type_boolean    -> TypeString
+  Type_boolean    -> TypeBoolean
   Type_int        -> TypeInteger
   Type_double     -> TypeDouble
   Type_void       -> TypeVoid

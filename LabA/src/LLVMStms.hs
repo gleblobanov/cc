@@ -34,37 +34,42 @@ transSDecls t ids ss = do declStms <- transDecl t ids
 
 transDecl :: Type -> [Id] -> EnvState Env [LLVMStm]
 transDecl _ []  = return []
-transDecl t (vid:vids) = do stm  <- mkDeclStm t vid
-                            stms <- transDecl t vids
-                            return (stm:stms)
+transDecl t (vid:vids) = do stms  <- mkDeclStm t vid
+                            stms' <- transDecl t vids
+                            return $ stms ++ stms'
 
-mkDeclStm :: Type -> Id -> EnvState Env LLVMStm
-mkDeclStm t vid = do (ident, t') <- extendVarDecl vid t
+mkDeclStm :: Type -> Id -> EnvState Env [LLVMStm]
+mkDeclStm t vid = do (OI ptr, t') <- extendVarDecl vid t
                      let allInstr = Allocate t'
-                         stm      = LLVMStmAssgn ident allInstr
-                     return stm
+                         allstm   = LLVMStmAssgn ptr allInstr
+                         val = OC $ case t' of
+                           TypeInteger -> ConstInteger 0
+                           TypeDouble  -> ConstDouble 0.0
+                           TypeBoolean -> ConstFalse
+                         sStore   = LLVMStmInstr (Store t' val t' ptr)
+                     return [allstm, sStore]
 
 
 
 transSInit :: Type -> [Id] -> Exp -> [Stm] -> EnvState Env [LLVMStm]
-transSInit t ids e ss = do ((vid, _), expStms) <- transExp e
+transSInit t ids e ss = do ((val, _), expStms) <- transExp e
                            cnt                 <- getCounter
-                           initStms            <- mkInitStms t ids vid
+                           initStms            <- mkInitStms t ids val
                            restStms            <- transStms ss
                            return $ expStms ++ initStms ++ restStms
 
-mkInitStms :: Type -> [Id] -> Identifier -> EnvState Env [LLVMStm]
+mkInitStms :: Type -> [Id] -> Operand -> EnvState Env [LLVMStm]
 mkInitStms _ [] _ = return []
 mkInitStms t (vid:vids) tmp = do stms     <- mkInitStm t vid tmp
                                  stmsRest <- mkInitStms t vids tmp
                                  return (stms ++ stmsRest)
 
-mkInitStm :: Type -> Id -> Identifier -> EnvState Env [LLVMStm]
-mkInitStm t vid tmp = do (identPtr, t') <- extendVarDecl vid t
+mkInitStm :: Type -> Id -> Operand -> EnvState Env [LLVMStm]
+mkInitStm t vid val = do (OI ptr, t') <- extendVarDecl vid t
                          let allInstr = Allocate t'
-                             sAlloc   = LLVMStmAssgn identPtr allInstr
+                             sAlloc   = LLVMStmAssgn ptr allInstr
                              tPtr'    = t'
-                             sStore   = LLVMStmInstr (Store t' (OI tmp) tPtr' identPtr)
+                             sStore   = LLVMStmInstr (Store t' val tPtr' ptr)
                          return [sAlloc, sStore]
 
 
@@ -72,9 +77,9 @@ mkInitStm t vid tmp = do (identPtr, t') <- extendVarDecl vid t
 
 transSReturn :: ReturnRest ->  EnvState Env [LLVMStm]
 transSReturn rest = case rest of
-  ReturnRest e -> do ((vid, _), expStms) <- transExp e
+  ReturnRest e -> do ((val, _), expStms) <- transExp e
                      t <- getType
-                     let retStm = LLVMStmInstr (Return t (OI vid))
+                     let retStm = LLVMStmInstr (Return t val)
                      return $ expStms ++ [retStm]
   ReturnRestEmpt -> return [LLVMStmInstr ReturnVoid]
 
@@ -88,21 +93,23 @@ transSWhile e stm ss = do whileStms <- transWhile e stm
                           return $ whileStms ++ restStms
 
 transWhile :: Exp -> Stm -> EnvState Env [LLVMStm]
-transWhile e stm = do ((vid, t), expStms) <- transExp e
+transWhile e stm = do ((val, t), expStms) <- transExp e
                       stms <- transStms [stm]
                       c1 <- getCounter
                       c2 <- getCounter
                       c3 <- getCounter
                       ct <- getCounter
-                      let l1  = LLVMLabel $ show c1
+                      let l1  = LLVMLabel $ "lab" ++ show c1
                           sl1 = LLVMStmLabel l1
-                          l2  = LLVMLabel $ show c2
+                          l2  = LLVMLabel $ "lab" ++ show c2
                           sl2 = LLVMStmLabel l2
-                          l3  = LLVMLabel $ show c3
+                          l3  = LLVMLabel $ "lab" ++ show c3
                           sl3 = LLVMStmLabel l3
-                          condStm   = LLVMStmInstr (CondBranch (OI vid) (show l2) (show l3))
-                          uncondStm = LLVMStmInstr (UncondBranch (show l1))
-                          res = [sl1]       ++
+                          condStm   = LLVMStmInstr (CondBranch val (show l2) (show l3))
+                          uncondStm  = LLVMStmInstr (UncondBranch (show l1))
+                          res =
+                                [uncondStm] ++ -- TODO Remove it and look what happens
+                                [sl1]       ++
                                  expStms    ++
                                 [condStm]   ++
                                 [sl2]       ++
@@ -130,28 +137,30 @@ transBlock stms = do newBlock
 
 
 
+
 transSIf :: Exp -> IfRest -> [Stm] -> EnvState Env [LLVMStm]
 transSIf e r ss = do ifStms <- transIf e r
                      restStms  <- transStms ss
                      return $ ifStms ++ restStms
 
+-- TODO Merge two branches effectively
 transIf :: Exp -> IfRest -> EnvState Env [LLVMStm]
 transIf e r = case r of
   IfR stm rr -> case rr of
-    IfRREl stmEl -> do ((vid, t), expStms) <- transExp e
+    IfRREl stmEl -> do ((val, t), expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        c3 <- getCounter
                        ct <- getCounter
                        stms   <- transStms [stm]
                        stmsEl <- transStms [stmEl]
-                       let l1  = LLVMLabel $ show c1
+                       let l1  = LLVMLabel $  "lab" ++ show c1
                            sl1 = LLVMStmLabel l1
-                           l2  = LLVMLabel $ show c2
+                           l2  = LLVMLabel $  "lab" ++ show c2
                            sl2 = LLVMStmLabel l2
-                           l3  = LLVMLabel $ show c3
+                           l3  = LLVMLabel $  "lab" ++ show c3
                            sl3 = LLVMStmLabel l3
-                           condStm   = LLVMStmInstr (CondBranch (OI vid) (show l1) (show l2))
+                           condStm   = LLVMStmInstr (CondBranch val (show l1) (show l2))
                            uncondStm = LLVMStmInstr (UncondBranch (show l3))
                            res = expStms    ++
                                 [condStm]   ++
@@ -160,23 +169,26 @@ transIf e r = case r of
                                 [uncondStm] ++
                                 [sl2]       ++
                                  stmsEl     ++
+                                [uncondStm] ++
                                 [sl3]
                        return res
 
-    IfRRE        -> do ((vid, t), expStms) <- transExp e
+    IfRRE        -> do ((val, t), expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        ct <- getCounter
                        stms   <- transStms [stm]
-                       let l1  = LLVMLabel $ show c1
+                       let l1  = LLVMLabel $ "lab" ++  show c1
                            sl1 = LLVMStmLabel l1
-                           l2  = LLVMLabel $ show c2
+                           l2  = LLVMLabel $ "lab" ++  show c2
                            sl2 = LLVMStmLabel l2
-                           condStm   = LLVMStmInstr (CondBranch (OI vid) (show l1) (show l2))
+                           condStm   = LLVMStmInstr (CondBranch val (show l1) (show l2))
+                           uncondStm = LLVMStmInstr (UncondBranch (show l2))
                            res = expStms    ++
                                 [condStm]   ++
                                 [sl1]       ++
                                  stms       ++
+                                [uncondStm]  ++
                                 [sl2]
                        return res
 
