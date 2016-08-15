@@ -29,7 +29,7 @@ instance Applicative (EnvState q) where
 
 
 
-type GlobalStrings = [(String, (Identifier, Int))]
+type GlobalStrings = [(String, (Identifier, Integer))]
 
 emptyEnv :: Env
 emptyEnv = ([], Scope [[]] 0, emptyFuns, [], TypeVoid)
@@ -46,7 +46,7 @@ genLocal = do cnt <- getCounter
               return $ Local $ "t" ++ show cnt
 
 
-lookupGS :: String -> EnvState Env (Maybe (Identifier, Int))
+lookupGS :: String -> EnvState Env (Maybe (Identifier, Integer))
 lookupGS str = EnvState (\env -> let gs = getGlobalStrings env
                                  in (lookup str gs, env))
 
@@ -70,6 +70,9 @@ getType = EnvState (\(l, s, f, g, t) -> (t, (l, s, f, g, t)))
 
 getScope :: EnvState Env Scope
 getScope = EnvState (\(l, s, f, g, t) -> (s, (l, s, f, g, t)))
+
+putStorage :: Storage -> EnvState Env ()
+putStorage st = EnvState (\(l, Scope _ i, f, g, t) -> ((), (l, Scope st i, f, g, t)))
 
 getFuns :: EnvState Env Funs
 getFuns = EnvState (\(l, s, f, g, t) -> (f, (l, s, f, g, t)))
@@ -120,12 +123,39 @@ lookupVar vid = do sc <- getScope
                      Nothing -> fail $ "Variable isn't found " ++ show vid ++ "\n" ++ show env
 
 
+
 lookup' :: Eq a => a -> [[(a,b)]] -> Maybe b
 lookup' _ []     = Nothing
 lookup' a (m:ms) = case lookup a m of
   Just b  -> Just b
   Nothing -> lookup' a ms
 
+
+lookupArr :: Id -> EnvState Env (Operand, LLVMType, LLVMType)
+lookupArr vid = do (op, t) <- lookupVar vid
+                   case t of
+                     TypeArray len t' -> return (op, t, t')
+                     _ -> fail $ "Can't find an array: " ++ show vid
+
+changeArr :: (Operand, LLVMType) -> Id -> EnvState Env ()
+changeArr len vid = do sc <- getScope
+                       env <- get
+                       let str = scopeStr sc
+                           res = change' len vid str
+                       putStorage res
+
+
+change' :: (Operand, LLVMType) -> Id -> [[(Id ,(Operand, LLVMType))]] -> [[(Id, (Operand, LLVMType))]]
+change' _ _ []     = []
+change' oT vid (m:ms) = case lookup vid m of
+  Just _  -> ((vid, oT) : del vid m)  : ms
+  _ -> m : change' oT vid ms
+
+
+del :: Id -> [(Id, a)] -> [(Id, a)]
+del _ [] = []
+del i ((x, y):ss) | i == x    = ss
+                  | otherwise = (x,y) : del i ss
 
 lookupFun :: Id -> EnvState Env (Maybe FunType)
 lookupFun fid = EnvState (\(ls, sc, fs, gs, t) -> (lookup fid fs, (ls, sc, fs, gs, t)))
@@ -141,6 +171,7 @@ extendVar vid val t = EnvState (\(ls, s, fs, gs, tt) ->
                                         then [el] : str
                                         else (el : head str) : tail str
                              in (opr, (ls, Scope s' cnt, fs, gs, tt)))
+
 
 extendVarDecl :: Id -> Type -> EnvState Env (Operand, LLVMType)
 extendVarDecl vid t = EnvState (\(ls, s, fs, gs, tt) ->
@@ -163,7 +194,7 @@ extendFun (DFun t (Id fid) args _) =
      cnt <- getCounter
      let fs'   = (Id fid, (t', fid', args')) : fs
          fid'  = Global fid
-         t'    = transType t
+         t'    = transTypeFun t
          args' = transArgs args cnt
      putFuns fs'
 
@@ -175,6 +206,7 @@ transArg cnt (ADecl t (Id aid )) = LLVMArg (transType t) (OI $ Local (aid ++ sho
 
 
 
+-- TODO possible bug
 transType :: Type -> LLVMType
 transType t = case t of
   Type_true       -> TypeBoolean
@@ -185,3 +217,11 @@ transType t = case t of
   Type_double     -> TypeDouble
   Type_void       -> TypeVoid
   Type_string     -> TypeString
+  TypeArr t' _    -> TypeArray (OC $ ConstInteger 0)  $ transType t'
+
+
+-- transTypeFun :: Type -> LLVMType
+-- transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
+-- transTypeFun t = transType t
+
+transTypeFun = transType

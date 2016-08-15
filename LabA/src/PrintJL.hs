@@ -108,6 +108,7 @@ instance Print Stm where
     SReturn returnrest -> prPrec i 0 (concatD [doc (showString "return"), prt 0 returnrest])
     SWhile exp stm -> prPrec i 0 (concatD [doc (showString "while"), doc (showString "("), prt 0 exp, doc (showString ")"), prt 0 stm])
     SBlock stms -> prPrec i 0 (concatD [doc (showString "{"), prt 0 stms, doc (showString "}")])
+    SForeach type_ id1 id2 stm -> prPrec i 0 (concatD [doc (showString "for"), doc (showString "("), prt 0 type_, prt 0 id1, doc (showString ":"), prt 0 id2, doc (showString ")"), prt 0 stm])
     SIf exp ifrest -> prPrec i 0 (concatD [doc (showString "if"), doc (showString "("), prt 0 exp, doc (showString ")"), prt 0 ifrest])
   prtList _ [] = (concatD [])
   prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
@@ -134,11 +135,13 @@ instance Print Exp where
     EInt n -> prPrec i 15 (concatD [prt 0 n])
     EDouble d -> prPrec i 15 (concatD [prt 0 d])
     EId id -> prPrec i 15 (concatD [prt 0 id])
+    EIdArr id inbrs -> prPrec i 15 (concatD [prt 0 id, prt 0 inbrs])
     EApp id exps -> prPrec i 15 (concatD [prt 0 id, doc (showString "("), prt 0 exps, doc (showString ")")])
     ENeg exp -> prPrec i 14 (concatD [doc (showString "-"), prt 14 exp])
     ENot exp -> prPrec i 14 (concatD [doc (showString "!"), prt 14 exp])
     EPostIncr exp -> prPrec i 14 (concatD [prt 15 exp, doc (showString "++")])
     EPostDecr exp -> prPrec i 14 (concatD [prt 15 exp, doc (showString "--")])
+    ELength exp -> prPrec i 14 (concatD [prt 15 exp, doc (showString "."), doc (showString "length")])
     EPreIncr exp -> prPrec i 13 (concatD [doc (showString "++"), prt 14 exp])
     EPreDecr exp -> prPrec i 13 (concatD [doc (showString "--"), prt 14 exp])
     ETimes exp1 exp2 -> prPrec i 12 (concatD [prt 12 exp1, doc (showString "*"), prt 13 exp2])
@@ -154,6 +157,7 @@ instance Print Exp where
     ENEq exp1 exp2 -> prPrec i 8 (concatD [prt 9 exp1, doc (showString "!="), prt 9 exp2])
     EAnd exp1 exp2 -> prPrec i 4 (concatD [prt 4 exp1, doc (showString "&&"), prt 5 exp2])
     EOr exp1 exp2 -> prPrec i 3 (concatD [prt 3 exp1, doc (showString "||"), prt 4 exp2])
+    ENew type_ inbrs -> prPrec i 3 (concatD [doc (showString "new"), prt 0 type_, prt 0 inbrs])
     EAss exp1 exp2 -> prPrec i 2 (concatD [prt 3 exp1, doc (showString "="), prt 2 exp2])
   prtList _ [] = (concatD [])
   prtList _ [x] = (concatD [prt 0 x])
@@ -168,5 +172,16 @@ instance Print Type where
     Type_string -> prPrec i 0 (concatD [doc (showString "string")])
     Type_bool_undef -> prPrec i 0 (concatD [doc (showString "bool_undef")])
     Type_boolean -> prPrec i 0 (concatD [doc (showString "boolean")])
+    TypeArr type_ emptbrs -> prPrec i 0 (concatD [prt 0 type_, prt 0 emptbrs])
 
+instance Print EmptBr where
+  prt i e = case e of
+    EmptBr -> prPrec i 0 (concatD [doc (showString "["), doc (showString "]")])
+  prtList _ [] = (concatD [])
+  prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
+instance Print InBr where
+  prt i e = case e of
+    InBr exp -> prPrec i 0 (concatD [doc (showString "["), prt 0 exp, doc (showString "]")])
+  prtList _ [x] = (concatD [prt 0 x])
+  prtList _ (x:xs) = (concatD [prt 0 x, prt 0 xs])
 

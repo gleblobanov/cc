@@ -1,11 +1,11 @@
-module Grade where
+module Main where
 
 import RunCommand
 import KompTest
 
 import Data.List
 import Data.Maybe
-import System.Directory hiding (makeAbsolute)
+import System.Directory
 import System.Environment
 import System.Exit
 import System.IO
@@ -23,16 +23,12 @@ cmd c = do
   putStrLn err
 
 
-makeAbsolute p = do
-  c <- getCurrentDirectory
-  return (c </> p)
-
 maybeBuild _ [] = return ()
 maybeBuild groupPath0 ((tarOpt,subm) : _) = do
    cmd $ "tar -C "++groupPath0 ++" -"++ tarOpt++"xvf "++ show (groupPath0 </> subm)
    cmd $ "make -C " ++ show (groupPath0 </> "src")
    
-testAll compiler bs exts [testSuitePath00, groupPath0] = do
+testAll llvmver compiler bs exts [testSuitePath00, groupPath0] = do
   allFiles <- getDirectoryContents groupPath0
   let submissions = [(opts, s) | 
                     (opts, suff) <- [("z", ".tar.gz"), ("j", ".tar.bz2"), ("j", ".tar.bzip2"), ("", ".tar")],
@@ -55,7 +51,7 @@ testAll compiler bs exts [testSuitePath00, groupPath0] = do
   let testProg = if null bs then Nothing
                  else case bs of
                    "JVM"  : _ -> Just testJVM
-                   "LLVM" : _ -> Just testLLVM
+                   "LLVM" : _ -> Just (testLLVM llvmver)
                    "x86" : _ -> Just testx86
                    b : _ -> error ("Unknown backend: " ++ b) 
   setCurrentDirectory exeDir
@@ -96,18 +92,20 @@ testSpecs testProg exts libpath =
 testBack back cmd good fs = if good then test cmd fs back else return []
 
 testJVM classpath = testBack (jvmBackend classpath)
-testLLVM libpath  = testBack (llvmBackend libpath)
+testLLVM ver libpath  = testBack (llvmBackend ver libpath)
 testx86 libpath   = testBack (x86Backend libpath)
 
 data Flag = SearchScript String
           | Extension String
           | Back String
+          | LLVMVersion String
    deriving (Eq,Ord)
 
 flags =
     [Option "s" ["search-compiler"] (ReqArg SearchScript "<compiler>") "search for the specified compiler",
      Option "x" ["extension"] (ReqArg Extension "<extension>") "specify extensions to test",
-     Option "b" ["backend"] (ReqArg Back "<backend>") "specify backend"]
+     Option "b" ["backend"] (ReqArg Back "<backend>") "specify backend",
+     Option "l" ["llvm-version"] (ReqArg LLVMVersion "<version>") "specify LLVM version for code generation test"]
 
 main = do
   argv <- getArgs
@@ -117,7 +115,8 @@ main = do
              compiler = if null searchList0 then "jlc" else head searchList0
              exts = [e | Extension e <- opts]
              bs = [b | Back b <- opts]
-         testAll compiler bs exts args
+             llvmver = last $ "" : ['-':v | LLVMVersion v <- opts]
+         testAll llvmver compiler bs exts args
     (_,_,errs) -> do
             hPutStrLn stderr (concat errs ++ usageInfo "" flags)
             exitWith (ExitFailure 1)

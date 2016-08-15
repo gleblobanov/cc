@@ -17,10 +17,12 @@ import Build
 typeCheck :: String -> IO Program
 typeCheck s = case pProgram (myLexer s) of
   Bad err  -> do
-    hPutStrLn stderr "ERROR"
-    return $ PDefs []
+     print err
+     hPutStrLn stderr "ERROR"
+     return $ PDefs []
   Ok tree -> case typecheck tree of
     Bad err -> do
+      print err
       hPutStrLn stderr "ERROR"
       return $ PDefs []
     Ok _ -> do

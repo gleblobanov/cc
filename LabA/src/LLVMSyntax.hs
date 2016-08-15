@@ -1,7 +1,48 @@
 module LLVMSyntax where
 
 import Data.List
-import LLVMTypes
+
+
+type Label = String
+type Addr = Integer
+
+-- | LLVM types.
+data LLVMType = TypeInteger
+              | TypeChar
+              | TypeBoolean -- Pointer to one bit integer or boolean.
+              | TypeFloat
+              | TypeDouble
+              | TypeVoid
+              | TypeString
+              | TypeFunction LLVMType [LLVMType]
+              | TypeStructure [LLVMType]
+              | TypeArray Operand LLVMType
+              | TypePtr LLVMType
+              | TypeArrayOfPtr [LLVMType]
+              | None
+
+
+instance Show LLVMType where
+  show instr = case instr of
+    TypeInteger -> "i32"
+    TypeChar    -> "i8"
+    TypeBoolean -> "i1"
+    TypeFloat   -> "float"
+    TypeDouble  -> "double"
+    TypeVoid    -> "void"
+    TypeString  -> "i8*"
+    TypeFunction t ts -> ""
+    TypeStructure ts  -> ""
+    TypeArray len t  -> "{ i32, [ 0 x " ++ show t ++ "]}"
+    -- TypeArray len t  -> "{ i32, [" ++ show len ++ " x " ++ show t ++ "]}"
+    TypePtr t -> show t ++ "*"
+    TypeArrayOfPtr t     -> ""
+    _ -> ""
+
+
+typeFromPtr :: LLVMType -> LLVMType
+typeFromPtr (TypePtr t) = t
+typeFromPtr t = t
 
 
 
@@ -101,7 +142,8 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
                  | Or  LLVMType Operand Operand
 
                  | Allocate LLVMType
-                 | GetElementPtr LLVMType Operand Operand Operand
+                 | AllocateArr LLVMType Operand
+                 | GetElementPtr LLVMType Operand [Operand]
                  | Store LLVMType Operand LLVMType Identifier
                  | Load  LLVMType Operand
 
@@ -141,9 +183,10 @@ instance Show Instruction where
       Or   t o1 o2 -> "or "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
 
       Allocate t           -> "alloca " ++ show t
-      GetElementPtr t o1 o2 o3 ->
-        "getelementptr " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
-                                   ++  ", " ++ show o3
+      AllocateArr t i      -> "alloca " ++ show t ++ ", i32 " ++ show i
+      GetElementPtr t ptr inds ->
+        "getelementptr " ++ show (TypePtr t) ++ " " ++ show ptr ++ ", " ++
+        (intercalate ", " $ map show inds)
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
         show (TypePtr tp) ++ " " ++ show o2
@@ -184,7 +227,10 @@ instance Show Instruction where
 
 data LLVMArg = LLVMArg LLVMType Operand
 instance Show LLVMArg where
-  show (LLVMArg t aid) = show t ++ " " ++ show aid
+  show (LLVMArg t aid) = typ ++ " " ++ show aid
+    where typ = case t of
+            TypeArray _ _ -> show t
+            _             -> show t
 
 data LLVMArgs = LLVMArgs [LLVMArg]
 instance Show LLVMArgs where
@@ -196,9 +242,13 @@ type LLVMTree = [LLVMFunction]
 data LLVMFunction = LLVMFunction LLVMType Identifier LLVMArgs [LLVMStm]
 instance Show LLVMFunction where
   show (LLVMFunction t fid args stms) =
-    "define " ++ show t ++ " " ++ show fid ++ " (" ++ show args ++ ") {\n" ++
+    "define " ++ typ ++ " " ++ show fid ++ " (" ++ show args ++ ") {\n" ++
     instrsCode ++ "\n}\n\n"
     where instrsCode = concatMap show stms
+          typ = case t of
+            TypeArray _ _ -> show t -- ++ "*"
+            _             -> show t
+
 
 
 data LLVMStm = LLVMStmInstr Instruction

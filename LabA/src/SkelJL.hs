@@ -29,6 +29,7 @@ transStm x = case x of
   SReturn returnrest -> failure x
   SWhile exp stm -> failure x
   SBlock stms -> failure x
+  SForeach type_ id1 id2 stm -> failure x
   SIf exp ifrest -> failure x
 transReturnRest :: ReturnRest -> Result
 transReturnRest x = case x of
@@ -50,11 +51,13 @@ transExp x = case x of
   EInt integer -> failure x
   EDouble double -> failure x
   EId id -> failure x
+  EIdArr id inbrs -> failure x
   EApp id exps -> failure x
   ENeg exp -> failure x
   ENot exp -> failure x
   EPostIncr exp -> failure x
   EPostDecr exp -> failure x
+  ELength exp -> failure x
   EPreIncr exp -> failure x
   EPreDecr exp -> failure x
   ETimes exp1 exp2 -> failure x
@@ -70,6 +73,7 @@ transExp x = case x of
   ENEq exp1 exp2 -> failure x
   EAnd exp1 exp2 -> failure x
   EOr exp1 exp2 -> failure x
+  ENew type_ inbrs -> failure x
   EAss exp1 exp2 -> failure x
 transType :: Type -> Result
 transType x = case x of
@@ -81,4 +85,11 @@ transType x = case x of
   Type_string -> failure x
   Type_bool_undef -> failure x
   Type_boolean -> failure x
+  TypeArr type_ emptbrs -> failure x
+transEmptBr :: EmptBr -> Result
+transEmptBr x = case x of
+  EmptBr -> failure x
+transInBr :: InBr -> Result
+transInBr x = case x of
+  InBr exp -> failure x
 

@@ -7,13 +7,6 @@ import LLVMStms
 import Control.Monad
 import LLVMTypes
 
-declPrintRead :: String
-declPrintRead = "declare void @printInt(i32)\n\
-                \declare void @printDouble(double)\n\
-                \declare void @printString(i8*)\n\
-                \declare i32 @readInt()\n\
-                \declare double @readDouble()\n"
-
 putStmsToFun :: LLVMFunction -> [LLVMStm] -> LLVMFunction
 putStmsToFun (LLVMFunction t fid args _) = LLVMFunction t fid args
 
@@ -66,4 +59,12 @@ allocateArg (JL.ADecl typ aid, LLVMArg typ' op) =
      extendVar aid (OI ptr) typ'
      return [stm1, stm2]
 
+
+declPrintRead :: String
+declPrintRead = "declare void @printInt(i32)\n\
+                \declare void @printDouble(double)\n\
+                \declare void @printString(i8*)\n\
+                \declare i32 @readInt()\n\
+                \declare double @readDouble()\n\
+                \declare i8* @calloc(i32, i32)\n"
 

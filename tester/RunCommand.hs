@@ -4,7 +4,7 @@ import System.Exit
 import System.IO
 import Control.Concurrent
 import Control.Concurrent.Chan
-import Data.Either hiding (isLeft)
+import Data.Either
 
 type Pipe = Chan (Either Char ())
 
@@ -26,9 +26,6 @@ pipeClose p = writeChan p (Right ())
 -- * Either utilities
 --
 
-isLeft :: Either a b -> Bool
-isLeft = either (const True) (const False)
-
 fromLeft :: Either a b -> a
 fromLeft =  either id (error "fromLeft: Right")
 
@@ -37,7 +34,7 @@ fromLeft =  either id (error "fromLeft: Right")
 --
 
 runCommandChan :: String -- ^ command
-	      -> IO (Pipe,Pipe,Pipe,ProcessHandle) -- ^ stdin, stdout, stderr, process
+              -> IO (Pipe,Pipe,Pipe,ProcessHandle) -- ^ stdin, stdout, stderr, process
 runCommandChan c = 
     do
     inC  <- newChan
@@ -50,8 +47,8 @@ runCommandChan c =
     return (inC,outC,errC,p)
 
 runCommandStr :: String -- ^ command
-	      -> String -- ^ stdin data
-	      -> IO (String,String,ProcessHandle) -- ^ stdout, stderr, process
+              -> String -- ^ stdin data
+              -> IO (String,String,ProcessHandle) -- ^ stdout, stderr, process
 runCommandStr c inStr = 
     do
     (inC,outC,errC,p) <- runCommandChan c
@@ -61,8 +58,8 @@ runCommandStr c inStr =
     return (out,err,p)
 
 runCommandStrWait :: String -- ^ command
-		  -> String -- ^ stdin data
-		  -> IO (String,String,ExitCode) -- ^ stdout, stderr, process exit status
+                  -> String -- ^ stdin data
+                  -> IO (String,String,ExitCode) -- ^ stdout, stderr, process exit status
 runCommandStrWait c inStr =
     do
     (out,err,p) <- runCommandStr c inStr

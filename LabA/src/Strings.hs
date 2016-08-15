@@ -22,6 +22,7 @@ findStringsStm gs stm =
     SInit _ _ e   -> findStringsExp gs e
     SWhile _ stm' -> findStringsStm gs stm'
     SBlock stms   -> foldl findStringsStm gs stms
+    SForeach _ _ _ stm' -> findStringsStm gs stm'
     SIf _ ifRest  ->
       case ifRest of
         IfR stm' ifRestRest ->
@@ -39,7 +40,7 @@ findStringsExp :: GlobalStrings -> Exp -> GlobalStrings
 findStringsExp gs e
   = let strId = "str" ++ show (length gs)
     in case e of
-  (EString str) -> (str, (Global strId, length str + 1)) : gs
+  (EString str) -> (str, (Global strId, toInteger(length str) + 1)) : gs
   (EApp _ es)  -> foldl findStringsExp gs es
   _             -> gs
 
@@ -47,7 +48,7 @@ findStringsExp gs e
 toGlobalVars :: GlobalStrings -> String
 toGlobalVars = concatMap toVar
 
-toVar :: (String, (Identifier, Int)) -> String
+toVar :: (String, (Identifier, Integer)) -> String
 toVar (str,(Global strId, strLen)) =
   "@" ++ strId ++ " = internal constant [" ++ show strLen ++
   " x i8] c\"" ++ str ++ "\00\"\n"

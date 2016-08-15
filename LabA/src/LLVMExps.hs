@@ -1,5 +1,5 @@
 module LLVMExps where
- 
+
 import AbsJL
 import LLVMSyntax
 import Environment
@@ -11,6 +11,7 @@ transExp exp =   case exp of
  EFalse       -> transFalse
  EString s    -> transString s
  EInt i       -> transInteger i
+ EIdArr id inbrs -> transIdArr id inbrs
  EDouble d    -> transDouble d
  EId id       -> transId id
  EApp fid es  -> transApp fid es
@@ -34,6 +35,9 @@ transExp exp =   case exp of
  EAnd e1 e2    -> transAnd e1 e2
  EOr e1 e2     -> transOr e1 e2
  EAss (EId vid) e -> transAss vid e
+ EAss arr@(EIdArr vid inbrs) e -> transAssArr arr e
+ ENew t inbrs    -> transNew t inbrs
+ ELength arr    -> transLen arr
 
 
 
@@ -65,10 +69,10 @@ transString s = do cnt <- getCounter
                    env <- get
                    let gs = getGlobalStrings env
                    case lookup s gs of
-                     Just (gid, len) -> do let ta = TypePtr $ TypeArray len TypeChar
+                     Just (gid, len) -> do let ta = TypeArray (OC $ ConstInteger len) TypeChar
                                                o  = OI gid
                                                o' = OT TypeInteger (OC (ConstInteger 0))
-                                               inst = GetElementPtr ta o o' o'
+                                               inst = GetElementPtr ta o [o', o']
                                                t =  Local $ "t" ++ show cnt
                                                sInstr = LLVMStmAssgn t inst
                                            return ((OI t, typeFromPtr ta), [sInstr])
@@ -89,14 +93,38 @@ transIdPtr vid = do (ptr, typ) <- lookupVar vid
 
 transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transId vid = do (ptr, typ) <- lookupVar vid
-                 val <- genLocal
-                 let s = LLVMStmAssgn val $ Load typ ptr
-                 return ((OI val, typ), [s])
+                 case typ of
+                   TypeArray _ _ -> return ((ptr, typ), [])
+                   _ -> do val <- genLocal
+                           let s = LLVMStmAssgn val $ Load typ ptr
+                           return ((OI val, typ), [s])
+
+                   -- _ -> do val <- genLocal
+                   --         let s = LLVMStmAssgn val $ Load typ ptr
+                   --         return ((OI val, typ), [s])
+
 
 
 -- transExpPtr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
 -- transExpPtr (EId vid) = do (OI ptr, typ) <- lookupVar vid
 --                            return ((ptr, typ), [])
+
+
+
+
+transIdArr :: Id -> [InBr] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transIdArr arr [InBr e] = do (arrPtr, arrType, arrElemType) <- lookupArr arr
+                             ((ind, _), expStms) <- transExp e
+                             elPtr <- genLocal
+                             el    <- genLocal
+                             let elPtrGetElPtr = LLVMStmAssgn elPtr $
+                                   GetElementPtr arrType
+                                   arrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                                           OT TypeInteger $ OC $ ConstInteger 1,
+                                           OT TypeInteger ind]
+                                 elLoad = LLVMStmAssgn el $ Load arrElemType (OI elPtr)
+                             return ((OI el, arrElemType), expStms ++ [elPtrGetElPtr,
+                                                              elLoad])
 
 
 
@@ -137,21 +165,41 @@ transApp (Id "readDouble") _ =
 transApp fid args = do executedArgsStms <- execArgs args
                        res <- genLocal
                        funs <- getFuns
+                       out <- genLocal
                        let executedArgs = map fst executedArgsStms
                            executedSS   = concatMap snd executedArgsStms
-                           llvmArgs = LLVMArgs $ map (\(val, typ) -> LLVMArg typ val)
-                                                     executedArgs
+                           -- llvmArgs = LLVMArgs $ map (\(val, typ) -> LLVMArg typ val)
+                                                     -- executedArgs
+                       (llvmArgs, stms) <- processArgs executedArgs
                        case lookup fid funs of
                          Just (ftyp, fid', _) ->
-                          let stm = case ftyp of
-                                TypeVoid -> LLVMStmInstr $ Call ftyp fid' llvmArgs
-                                _ -> LLVMStmAssgn res $ Call ftyp fid' llvmArgs
-                          in return ((OI res, ftyp), executedSS ++ [stm])
+                          let stms' = case ftyp of
+                                TypeVoid -> [LLVMStmInstr $ Call ftyp fid' llvmArgs]
+                                TypeArray _ _ -> let resAlloc   = LLVMStmAssgn res $ Allocate ftyp
+                                                     outAssign  = LLVMStmAssgn out $ Call ftyp fid' llvmArgs
+                                                     resStore = LLVMStmInstr $ Store ftyp (OI out) ftyp res
+                                                 in [resAlloc, outAssign, resStore]
+                                _ -> [LLVMStmAssgn res $ Call ftyp fid' llvmArgs]
+                          in return ((OI res, ftyp), executedSS ++ stms ++ stms')
                          Nothing -> fail $ "Function isn't found. " ++ show fid
 
 execArgs :: [Exp] -> EnvState Env [((Operand, LLVMType), [LLVMStm])]
 execArgs = mapM transExp
 
+processArgs :: [(Operand, LLVMType)] -> EnvState Env (LLVMArgs, [LLVMStm])
+processArgs []   = return (LLVMArgs [], [])
+processArgs (ot: ots) =
+  let o = fst ot
+      t = snd ot
+  in case t of
+     TypeArray _ _ -> do tmp <- genLocal
+                         let tmpLoad = LLVMStmAssgn tmp $ Load t o
+                             larg = LLVMArg t (OI tmp)
+                         (LLVMArgs largs, stms) <- processArgs ots
+                         return (LLVMArgs (larg:largs), tmpLoad:stms)
+
+     _              -> do (LLVMArgs largs, stms) <- processArgs ots
+                          return (LLVMArgs (LLVMArg t o : largs), stms)
 
 
 emitOperation :: Instruction -> EnvState Env (Operand, [LLVMStm])
@@ -412,7 +460,15 @@ transAnd :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAnd e1 e2 = transAndOr e1 e2 AOAnd
 
 
+type IfArr = Bool
+
+
 transAss :: Id -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAss vid (ENew t inbrs) =
+  do (opTy, allStms) <- transNew t inbrs
+     changeArr opTy vid
+     return (opTy, allStms)
+
 transAss vid e =
   do
     (OI ref, typ) <- lookupVar vid
@@ -425,3 +481,111 @@ transAss vid e =
 
 
 
+transAssArr :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAssArr (EIdArr vid [InBr e1]) e2 =
+  do
+    ((ind, _), e1Stms) <- transExp e1
+    ((val, _), e2Stms) <- transExp e2
+    (arrPtr, arrType, arrElemType) <- lookupArr vid
+    xPtr <- genLocal
+    let xPtrGetElPtr = LLVMStmAssgn xPtr $
+          GetElementPtr arrType
+          arrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                  OT TypeInteger $ OC $ ConstInteger 1,
+                  OT arrElemType ind]
+        xStore = LLVMStmInstr $ Store arrElemType val arrElemType xPtr
+    return ((val, arrElemType), e1Stms ++ e2Stms ++ [xPtrGetElPtr, xStore])
+
+
+
+
+
+transNew :: Type -> [InBr] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transNew t [InBr e] = do arrStrPtr <- genLocal
+                         lenPtr    <- genLocal
+                         ((arrLen, _), expStms) <- transExp e
+                         let arrElemType = transType t
+                             arrStrType = TypeArray arrLen arrElemType
+                             arrStrPtrAlloc = LLVMStmAssgn arrStrPtr $ Allocate arrStrType
+                             lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
+                               arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
+                                                     OT TypeInteger $ OC $ ConstInteger 0]
+
+                             lenStore  = LLVMStmInstr $ Store TypeInteger arrLen TypeInteger lenPtr
+
+                         indPtr <- genLocal
+                         let indPtrAlloc = LLVMStmAssgn indPtr $ Allocate TypeInteger
+                             indPtrStore = LLVMStmInstr $ Store
+                               TypeInteger (OC $ ConstInteger 0) TypeInteger indPtr
+
+                         c1 <- getCounter
+                         c2 <- getCounter
+                         c3 <- getCounter
+                         let l1 = LLVMLabel $ "lab" ++ show c1
+                             sl1 = LLVMStmLabel l1
+                             l2 = LLVMLabel $ "lab" ++ show c2
+                             sl2 = LLVMStmLabel l2
+                             l3 = LLVMLabel $ "lab" ++ show c3
+                             sl3 = LLVMStmLabel l3
+                             uncond1 = LLVMStmInstr (UncondBranch (show l1))
+
+                         ind   <- genLocal
+                         check <- genLocal
+                         xPtr  <- genLocal
+                         let indLoad = LLVMStmAssgn ind $ Load TypeInteger (OI indPtr)
+                             checkCmp = LLVMStmAssgn check $ ICmp Slt TypeInteger (OI ind) arrLen
+                             br = LLVMStmInstr $ CondBranch (OI check) (show l2) (show l3)
+
+                             xPtrGet = LLVMStmAssgn xPtr $ GetElementPtr
+                               arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
+                                                          OT TypeInteger $ OC $ ConstInteger 1,
+                                                          OT TypeInteger $ OI ind]
+
+                             xStore = LLVMStmInstr $
+                               case arrElemType of
+                                 TypeInteger -> Store TypeInteger (OC $ ConstInteger 0)
+                                   TypeInteger xPtr
+                                 TypeDouble  -> Store TypeDouble  (OC $ ConstDouble 0.0)
+                                   TypeDouble xPtr
+                                 TypeBoolean -> Store TypeBoolean (OC  ConstFalse)
+                                   TypeDouble xPtr
+
+                         indIncr <- genLocal
+                         let indIncrAdd = LLVMStmAssgn indIncr $
+                               Add TypeInteger (OI ind) (OC $ ConstInteger 1)
+                             indStore   = LLVMStmInstr $
+                               Store TypeInteger (OI indIncr) TypeInteger indPtr
+
+                         return ((OI arrStrPtr, arrStrType),
+                                 expStms ++ [arrStrPtrAlloc,
+                                             lenPtrGet,
+                                             lenStore,
+                                             indPtrAlloc,
+                                             indPtrStore,
+                                             uncond1,
+                                             sl1,
+                                             indLoad,
+                                             checkCmp,
+                                             br,
+                                             sl2,
+                                             xPtrGet,
+                                             xStore,
+                                             indIncrAdd,
+                                             indStore,
+                                             uncond1,
+                                             sl3])
+
+
+
+
+
+
+transLen :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transLen (EId arr) = do (arrStrPtr, arrStrType, _) <- lookupArr arr
+                        lenPtr <- genLocal
+                        arrLen <- genLocal
+                        let lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
+                              arrStrType arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                                                     OT TypeInteger $ OC $ ConstInteger 0]
+                            arrLenLoad = LLVMStmAssgn arrLen $ Load TypeInteger $ OI lenPtr
+                        return ((OI arrLen, TypeInteger), [lenPtrGet, arrLenLoad])

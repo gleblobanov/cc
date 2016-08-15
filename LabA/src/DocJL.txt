@@ -37,16 +37,18 @@ The set of reserved words is the set of terminals appearing in the grammar. Thos
 
 The reserved words used in JL are the following:
   | ``bool_undef`` | ``boolean`` | ``double`` | ``else``
-  | ``false`` | ``if`` | ``int`` | ``return``
-  | ``string`` | ``true`` | ``void`` | ``while``
+  | ``false`` | ``for`` | ``if`` | ``int``
+  | ``length`` | ``new`` | ``return`` | ``string``
+  | ``true`` | ``void`` | ``while`` | 
 
 The symbols used in JL are the following:
   | ( | ) | { | }
-  | , | ; | = | -
-  | ! | ++ | -- | *
-  | / | % | + | <
-  | > | <= | >= | ==
-  | != | && | || | 
+  | , | ; | = | :
+  | - | ! | ++ | --
+  | . | * | / | %
+  | + | < | > | <=
+  | >= | == | != | &&
+  | || | [ | ] | 
 
 ===Comments===
 Single-line comments begin with #, //.Multiple-line comments are  enclosed with /* and */.
@@ -71,6 +73,7 @@ All other symbols are terminals.
   |  |  **|**  | ``return`` //ReturnRest// 
   |  |  **|**  | ``while`` ``(`` //Exp// ``)`` //Stm// 
   |  |  **|**  | ``{`` //[Stm]// ``}`` 
+  |  |  **|**  | ``for`` ``(`` //Type// //Id// ``:`` //Id// ``)`` //Stm// 
   |  |  **|**  | ``if`` ``(`` //Exp// ``)`` //IfRest// 
   | //ReturnRest// | -> | //Exp// ``;`` 
   |  |  **|**  | ``;`` 
@@ -86,12 +89,14 @@ All other symbols are terminals.
   |  |  **|**  | //Integer// 
   |  |  **|**  | //Double// 
   |  |  **|**  | //Id// 
+  |  |  **|**  | //Id// //[InBr]// 
   |  |  **|**  | //Id// ``(`` //[Exp]// ``)`` 
   |  |  **|**  | ``(`` //Exp// ``)`` 
   | //Exp14// | -> | ``-`` //Exp14// 
   |  |  **|**  | ``!`` //Exp14// 
   |  |  **|**  | //Exp15// ``++`` 
   |  |  **|**  | //Exp15// ``--`` 
+  |  |  **|**  | //Exp15// ``.`` ``length`` 
   |  |  **|**  | //Exp15// 
   | //Exp13// | -> | ``++`` //Exp14// 
   |  |  **|**  | ``--`` //Exp14// 
@@ -114,6 +119,7 @@ All other symbols are terminals.
   | //Exp4// | -> | //Exp4// ``&&`` //Exp5// 
   |  |  **|**  | //Exp5// 
   | //Exp3// | -> | //Exp3// ``||`` //Exp4// 
+  |  |  **|**  | ``new`` //Type// //[InBr]// 
   |  |  **|**  | //Exp4// 
   | //Exp2// | -> | //Exp3// ``=`` //Exp2// 
   |  |  **|**  | //Exp3// 
@@ -134,6 +140,13 @@ All other symbols are terminals.
   |  |  **|**  | ``string`` 
   |  |  **|**  | ``bool_undef`` 
   |  |  **|**  | ``boolean`` 
+  |  |  **|**  | //Type// //[EmptBr]// 
+  | //EmptBr// | -> | ``[`` ``]`` 
+  | //[EmptBr]// | -> | **eps**
+  |  |  **|**  | //EmptBr// //[EmptBr]// 
+  | //InBr// | -> | ``[`` //Exp// ``]`` 
+  | //[InBr]// | -> | //InBr// 
+  |  |  **|**  | //InBr// //[InBr]// 
   | //[Id]// | -> | //Id// 
   |  |  **|**  | //Id// ``,`` //[Id]// 
 

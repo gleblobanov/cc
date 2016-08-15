@@ -24,6 +24,7 @@ data Stm
     | SReturn ReturnRest
     | SWhile Exp Stm
     | SBlock [Stm]
+    | SForeach Type Id Id Stm
     | SIf Exp IfRest
   deriving (Eq, Ord, Show, Read)
 
@@ -43,11 +44,13 @@ data Exp
     | EInt Integer
     | EDouble Double
     | EId Id
+    | EIdArr Id [InBr]
     | EApp Id [Exp]
     | ENeg Exp
     | ENot Exp
     | EPostIncr Exp
     | EPostDecr Exp
+    | ELength Exp
     | EPreIncr Exp
     | EPreDecr Exp
     | ETimes Exp Exp
@@ -63,6 +66,7 @@ data Exp
     | ENEq Exp Exp
     | EAnd Exp Exp
     | EOr Exp Exp
+    | ENew Type [InBr]
     | EAss Exp Exp
   deriving (Eq, Ord, Show, Read)
 
@@ -75,5 +79,12 @@ data Type
     | Type_string
     | Type_bool_undef
     | Type_boolean
+    | TypeArr Type [EmptBr]
+  deriving (Eq, Ord, Show, Read)
+
+data EmptBr = EmptBr
+  deriving (Eq, Ord, Show, Read)
+
+data InBr = InBr Exp
   deriving (Eq, Ord, Show, Read)
 
