@@ -509,26 +509,24 @@ transNew t [InBr e] = do arrStrPtr <- genLocal
                          ((arrLen, _), expStms) <- transExp e
                          arr <- genLocal
                          let arrElemType = transType t
-                             -- arrLen' = case arrLen of
-                             --   c@(OC (ConstInteger i)) -> c
-                             --   c -> OC $ ConstInteger 0
-                             innerType = (TypeArrayInner arrElemType)
                              arrStrType = TypeArray arrLen arrElemType
                              arrStrPtrAlloc =  LLVMStmAssgn arrStrPtr $ Allocate arrStrType
+
                              lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
                                arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
                                                      OT TypeInteger $ OC $ ConstInteger 0]
 
                              lenStore  = LLVMStmInstr $ Store TypeInteger arrLen TypeInteger lenPtr
-                             calloc =  LLVMStmAssgn callocVar $ Call TypeString (Global "calloc")
-                                 (LLVMArgs [LLVMArg TypeInteger arrLen, LLVMArg TypeInteger arrLen])
+
+                             calloc =  LLVMStmAssgn callocVar $ Call (TypePtr TypeInteger) (Global "calloc")
+                                 (LLVMArgs [LLVMArg TypeInteger arrLen, LLVMArg TypeInteger (OC $ ConstInteger 32)])
 
 
 
                              arrPtrInnerGet = LLVMStmAssgn arrPtrInner $ GetElementPtr
                                arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
                                                      OT TypeInteger $ OC $ ConstInteger 1]
-                             arrPtrInnerStore = LLVMStmInstr $ Store (TypeString) (OI callocVar)  (TypeArrayInner arrElemType) arrPtrInner
+                             arrPtrInnerStore = LLVMStmInstr $ Store (TypePtr TypeInteger) (OI callocVar)  (TypePtr TypeInteger) arrPtrInner
 
                          indPtr <- genLocal
                          let indPtrAlloc = LLVMStmAssgn indPtr $ Allocate TypeInteger
@@ -578,8 +576,8 @@ transNew t [InBr e] = do arrStrPtr <- genLocal
                                              lenPtrGet,
                                              lenStore,
                                              calloc,
-                                             -- arrPtrInnerGet,
-                                             -- arrPtrInnerStore,
+                                             arrPtrInnerGet,
+                                             arrPtrInnerStore,
                                              indPtrAlloc,
                                              indPtrStore,
                                              uncond1,

@@ -67,5 +67,5 @@ declPrintRead = "declare void @printInt(i32)\n\
                 \declare void @printString(i8*)\n\
                 \declare i32 @readInt()\n\
                 \declare double @readDouble()\n\
-                \declare i8* @calloc(i32, i32)\n"
+                \declare i32* @calloc(i32, i32)\n"
 

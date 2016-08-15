@@ -40,7 +40,7 @@ instance Show LLVMType where
     TypeFunction t ts -> ""
     TypeStructure ts  -> ""
     -- TypeArray len t  -> "{ i32, [ 0 x " ++ show t ++ "]}"
-    TypeArray len t  -> "{ i32, [" ++ (show 100) ++ " x " ++ show t ++ "]}"
+    TypeArray len t  -> "{ i32, [" ++ (show 0) ++ " x " ++ show t ++ "]}"
     TypeArrayInner t -> "[" ++ (show 0) ++ " x " ++ show t ++ "]"
     TypePtr t -> show t ++ "*"
     TypeArrayOfPtr t     -> ""
