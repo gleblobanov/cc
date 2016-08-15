@@ -1,5 +1,10 @@
 module LLVMSyntax where
 
+
+
+
+
+
 import Data.List
 
 
@@ -17,6 +22,7 @@ data LLVMType = TypeInteger
               | TypeFunction LLVMType [LLVMType]
               | TypeStructure [LLVMType]
               | TypeArray Operand LLVMType
+              | TypeArrayInner LLVMType
               | TypePtr LLVMType
               | TypeArrayOfPtr [LLVMType]
               | None
@@ -35,6 +41,7 @@ instance Show LLVMType where
     TypeStructure ts  -> ""
     -- TypeArray len t  -> "{ i32, [ 0 x " ++ show t ++ "]}"
     TypeArray len t  -> "{ i32, [" ++ (show 100) ++ " x " ++ show t ++ "]}"
+    TypeArrayInner t -> "[" ++ (show 0) ++ " x " ++ show t ++ "]"
     TypePtr t -> show t ++ "*"
     TypeArrayOfPtr t     -> ""
     _ -> ""
@@ -229,7 +236,7 @@ data LLVMArg = LLVMArg LLVMType Operand
 instance Show LLVMArg where
   show (LLVMArg t aid) = typ ++ " " ++ show aid
     where typ = case t of
-            TypeArray _ _ -> show t
+            TypeArray _ _ -> show t ++ "*"
             _             -> show t
 
 data LLVMArgs = LLVMArgs [LLVMArg]

@@ -54,11 +54,12 @@ transFun tree (JL.DFun t (JL.Id fid) args stms) =
 allocateArg :: (JL.Arg, LLVMArg) -> EnvState Env [LLVMStm]
 allocateArg (JL.ADecl typ aid, LLVMArg typ' op) =
   do ptr <- genLocal
-     let stm1 = LLVMStmAssgn ptr (Allocate typ')
-         stm2 = LLVMStmInstr $ Store typ' op typ' ptr
-     extendVar aid (OI ptr) typ'
-     return [stm1, stm2]
-
+     -- let stm1 = LLVMStmAssgn ptr (Allocate typ')
+     --     stm2 = LLVMStmInstr $ Store typ' op typ' ptr
+     -- extendVar aid (OI ptr) typ'
+     extendVar aid op typ'
+     return []
+     -- return [stm1, stm2]
 
 declPrintRead :: String
 declPrintRead = "declare void @printInt(i32)\n\

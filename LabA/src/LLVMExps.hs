@@ -192,11 +192,11 @@ processArgs (ot: ots) =
   let o = fst ot
       t = snd ot
   in case t of
-     TypeArray _ _ -> do tmp <- genLocal
-                         let tmpLoad = LLVMStmAssgn tmp $ Load t o
-                             larg = LLVMArg t (OI tmp)
-                         (LLVMArgs largs, stms) <- processArgs ots
-                         return (LLVMArgs (larg:largs), tmpLoad:stms)
+     -- TypeArray _ _ -> do tmp <- genLocal
+     --                     let tmpLoad = LLVMStmAssgn tmp $ Load t o
+     --                         larg = LLVMArg t (OI tmp)
+     --                     (LLVMArgs largs, stms) <- processArgs ots
+     --                     return (LLVMArgs (larg:largs), tmpLoad:stms)
 
      _              -> do (LLVMArgs largs, stms) <- processArgs ots
                           return (LLVMArgs (LLVMArg t o : largs), stms)
@@ -503,18 +503,32 @@ transAssArr (EIdArr vid [InBr e1]) e2 =
 transNew :: Type -> [InBr] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNew t [InBr e] = do arrStrPtr <- genLocal
                          lenPtr    <- genLocal
+                         arrPtr    <- genLocal
+                         callocVar <- genLocal
+                         arrPtrInner <- genLocal
                          ((arrLen, _), expStms) <- transExp e
+                         arr <- genLocal
                          let arrElemType = transType t
-                             arrLen' = case arrLen of
-                               c@(OC (ConstInteger i)) -> c
-                               c -> OC $ ConstInteger 0
-                             arrStrType = TypeArray arrLen' arrElemType
+                             -- arrLen' = case arrLen of
+                             --   c@(OC (ConstInteger i)) -> c
+                             --   c -> OC $ ConstInteger 0
+                             innerType = (TypeArrayInner arrElemType)
+                             arrStrType = TypeArray arrLen arrElemType
                              arrStrPtrAlloc =  LLVMStmAssgn arrStrPtr $ Allocate arrStrType
                              lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
                                arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
                                                      OT TypeInteger $ OC $ ConstInteger 0]
 
                              lenStore  = LLVMStmInstr $ Store TypeInteger arrLen TypeInteger lenPtr
+                             calloc =  LLVMStmAssgn callocVar $ Call TypeString (Global "calloc")
+                                 (LLVMArgs [LLVMArg TypeInteger arrLen, LLVMArg TypeInteger arrLen])
+
+
+
+                             arrPtrInnerGet = LLVMStmAssgn arrPtrInner $ GetElementPtr
+                               arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
+                                                     OT TypeInteger $ OC $ ConstInteger 1]
+                             arrPtrInnerStore = LLVMStmInstr $ Store (TypeString) (OI callocVar)  (TypeArrayInner arrElemType) arrPtrInner
 
                          indPtr <- genLocal
                          let indPtrAlloc = LLVMStmAssgn indPtr $ Allocate TypeInteger
@@ -563,6 +577,9 @@ transNew t [InBr e] = do arrStrPtr <- genLocal
                                  expStms ++ [arrStrPtrAlloc,
                                              lenPtrGet,
                                              lenStore,
+                                             calloc,
+                                             -- arrPtrInnerGet,
+                                             -- arrPtrInnerStore,
                                              indPtrAlloc,
                                              indPtrStore,
                                              uncond1,
