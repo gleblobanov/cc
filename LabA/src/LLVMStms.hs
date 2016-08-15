@@ -71,8 +71,8 @@ mkInitStms t (vid:vids) val t' = do stms     <- mkInitStm t vid val t'
 
 
 mkInitStm :: Type -> Id -> Operand -> LLVMType -> EnvState Env [LLVMStm]
-mkInitStm t@(TypeArr _ _) vid ptr (TypeArray len _) = do extendVar vid ptr $ transType t
-                                                         return []
+mkInitStm t@(TypeArr _ _) vid ptr t'@(TypeArray len _) = do extendVar vid ptr t'
+                                                            return []
 mkInitStm t vid val _ = do (OI ptr, t') <- extendVarDecl vid t
                            let allInstr = Allocate t'
                                sAlloc   = LLVMStmAssgn ptr allInstr

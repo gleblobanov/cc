@@ -175,9 +175,9 @@ transApp fid args = do executedArgsStms <- execArgs args
                          Just (ftyp, fid', _) ->
                           let stms' = case ftyp of
                                 TypeVoid -> [LLVMStmInstr $ Call ftyp fid' llvmArgs]
-                                TypeArray _ _ -> let resAlloc   = LLVMStmAssgn res $ Allocate ftyp
-                                                     outAssign  = LLVMStmAssgn out $ Call ftyp fid' llvmArgs
-                                                     resStore = LLVMStmInstr $ Store ftyp (OI out) ftyp res
+                                TypeArray len _ -> let resAlloc   = LLVMStmAssgn res $ Allocate ftyp
+                                                       outAssign  = LLVMStmAssgn out $ Call ftyp fid' llvmArgs
+                                                       resStore = LLVMStmInstr $ Store ftyp (OI out) ftyp res
                                                  in [resAlloc, outAssign, resStore]
                                 _ -> [LLVMStmAssgn res $ Call ftyp fid' llvmArgs]
                           in return ((OI res, ftyp), executedSS ++ stms ++ stms')
@@ -505,8 +505,11 @@ transNew t [InBr e] = do arrStrPtr <- genLocal
                          lenPtr    <- genLocal
                          ((arrLen, _), expStms) <- transExp e
                          let arrElemType = transType t
-                             arrStrType = TypeArray arrLen arrElemType
-                             arrStrPtrAlloc = LLVMStmAssgn arrStrPtr $ Allocate arrStrType
+                             arrLen' = case arrLen of
+                               c@(OC (ConstInteger i)) -> c
+                               c -> OC $ ConstInteger 0
+                             arrStrType = TypeArray arrLen' arrElemType
+                             arrStrPtrAlloc =  LLVMStmAssgn arrStrPtr $ Allocate arrStrType
                              lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
                                arrStrType (OI arrStrPtr) [OT TypeInteger $ OC $ ConstInteger 0,
                                                      OT TypeInteger $ OC $ ConstInteger 0]

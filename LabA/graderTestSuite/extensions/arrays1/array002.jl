@@ -1,7 +1,7 @@
-int [] doubleArray (int [] a){
-  int [] res = new int [a . length];
+int [] doubleArray (int [] a1){
+  int [] res = new int [a1 . length];
   int i = 0 ;
-  for (int n : a){
+  for (int n : a1){
     res [i] = 2 * n ;
     i ++ ;
   }
