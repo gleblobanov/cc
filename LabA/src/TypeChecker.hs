@@ -127,13 +127,13 @@ typecheck (PDefs defs) =
 
           mapM
                 (\(DFun outtyp id args stms)  ->
-                   let
-                        retType = case outtyp of
-                                Type_void -> Nothing
-                                _ -> Just outtyp
-                        in do
-
-                           fbdyenv <-
+                   if (id `elem` [Id "if", Id "while", Id "for"])
+                      then fail $ "if " ++ "is a keyword."
+                      else let
+                             retType = case outtyp of
+                                         Type_void -> Nothing
+                                         _ -> Just outtyp
+                           in do fbdyenv <-
                                    foldM
                                         (\env (ADecl atyp aid) ->
                                               updateVar env aid atyp
@@ -141,12 +141,12 @@ typecheck (PDefs defs) =
                                          (newBlock globalenv)
                                          args
 
-                           hr <- typecheckStms fbdyenv retType stms $ if (isJust retType)
+                                 hr <- typecheckStms fbdyenv retType stms $ if (isJust retType)
                                                                 then  checkRet stms
                                                                 else  False
-                           if outtyp /= Type_void && not hr
-                           then fail "No return."
-                           else return ()
+                                 if outtyp /= Type_void && not hr
+                                  then fail "No return."
+                                  else return ()
                 )
                 defs
           return ()
@@ -219,17 +219,24 @@ typecheckStms env typ (stm:stms) cR = case stm of
                       return $ r1 || r2
 
               SForeach typ' id1 id2 stms' -> do
-                      id2t <- lookupVar env id2
-                      env' <- updateVar (newBlock env) id1 typ'
-                      let id2t' = typeFromArr id2t
-                      if id2t' /= typ'
-                      then fail "Wrong type in foreach."
-                      else do r1 <- typecheckStms env' typ [stms'] cR
-                              r2 <- typecheckStms (exitBlock env') typ stms cR
-                              return $ r1 || r2
+                       id2t <- lookupVar env id2
+                       if (not $ isArr id2t)
+                        then fail $ show id2 ++ "Not an array."
+                        else do env' <- updateVar (newBlock env) id1 typ'
+                                let id2t' = typeFromArr id2t
+                                if id2t' /= typ'
+                                 then fail "Wrong type in foreach."
+                                 else do r1 <- typecheckStms env' typ [stms'] cR
+                                         r2 <- typecheckStms (exitBlock env') typ stms cR
+                                         return $ r1 || r2
+
+
+isArr (TypeArr _ _) = True
+isArr _ = False
 
 typeFromArr :: Type -> Type
 typeFromArr (TypeArr t _) = t
+typeFromArr t = t
 
 
 -- | Checks if if-else statement is of a correct type.

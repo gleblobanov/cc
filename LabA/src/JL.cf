@@ -25,7 +25,7 @@ SIf.     Stm    ::= "if" "(" Exp ")" IfRest ;
 IfR.     IfRest ::= Stm IfRestRest ;
 IfRE.    IfRest ::= ";" ;
 IfRREl.  IfRestRest ::= "else" Stm ;
-IfRRE.   IfRestRest ::= ;
+IfRRE.   IfRestRest ::=  ;
 
 terminator Stm "" ;
 
@@ -80,7 +80,7 @@ separator EmptBr "" ;
 InBr.   InBr   ::= "[" Exp "]" ;
 separator nonempty InBr "" ;
 
-token Id (letter (letter | digit | '_')*) ;
+token Id (letter (letter | digit | '_')*)  ;
 separator nonempty Id "," ;
 
 
