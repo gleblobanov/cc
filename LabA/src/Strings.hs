@@ -6,6 +6,7 @@ import Data.Map (Map)
 import Environment
 import LLVMSyntax
 
+-- | Traverse a syntax tree and collect global strings
 findStrings :: [Def] -> EnvState Env [Def]
 findStrings defs = EnvState (\(ls, sc, fs, _, t) ->
   let gs = foldl findStringsFun [] defs
@@ -21,6 +22,7 @@ findStringsStm gs stm =
     SInit _ _ e   -> findStringsExp gs e
     SWhile _ stm' -> findStringsStm gs stm'
     SBlock stms   -> foldl findStringsStm gs stms
+    SForeach _ _ _ stm' -> findStringsStm gs stm'
     SIf _ ifRest  ->
       case ifRest of
         IfR stm' ifRestRest ->
@@ -35,15 +37,18 @@ findStringsStm gs stm =
       ReturnRestEmpt -> gs
 
 findStringsExp :: GlobalStrings -> Exp -> GlobalStrings
-findStringsExp gs (EString str) =  (str, (strId, length str + 1)) : gs
-  where strId = "str" ++ show (length gs)
-findStringsExp gs _             = gs
+findStringsExp gs e
+  = let strId = "str" ++ show (length gs)
+    in case e of
+  (EString str) -> (str, (Global strId, toInteger(length str) + 1)) : gs
+  (EApp _ es)  -> foldl findStringsExp gs es
+  _             -> gs
 
 
 toGlobalVars :: GlobalStrings -> String
 toGlobalVars = concatMap toVar
 
-toVar :: (String, (GlobalId, Int)) -> String
-toVar (str,(GlobalId strId, strLen)) =
+toVar :: (String, (Identifier, Integer)) -> String
+toVar (str,(Global strId, strLen)) =
   "@" ++ strId ++ " = internal constant [" ++ show strLen ++
   " x i8] c\"" ++ str ++ "\00\"\n"

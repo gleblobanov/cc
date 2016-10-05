@@ -1,31 +1,76 @@
 module LLVMSyntax where
 
+
+
+
+
+
 import Data.List
-import LLVMTypes
 
-data Operand = OI Identifier | OC Constant
+
+type Label = String
+type Addr = Integer
+
+-- | LLVM types.
+data LLVMType = TypeInteger
+              | TypeChar
+              | TypeBoolean -- Pointer to one bit integer or boolean.
+              | TypeFloat
+              | TypeDouble
+              | TypeVoid
+              | TypeString
+              | TypeFunction LLVMType [LLVMType]
+              | TypeStructure [LLVMType]
+              | TypeArray Operand LLVMType
+              | TypeArrayInner LLVMType -- Array with 0 length
+              | TypeArrayInnerLen Integer LLVMType -- Array with a specified length
+              | TypePtr LLVMType
+              | TypeArrayOfPtr [LLVMType]
+              | None
+
+
+instance Show LLVMType where
+  show instr = case instr of
+    TypeInteger -> "i32"
+    TypeChar    -> "i8"
+    TypeBoolean -> "i1"
+    TypeFloat   -> "float"
+    TypeDouble  -> "double"
+    TypeVoid    -> "void"
+    TypeString  -> "i8*"
+    TypeFunction t ts -> ""
+    TypeStructure ts  -> ""
+    -- TypeArray len t  -> "{ i32, [ 0 x " ++ show t ++ "]}"
+    TypeArray len t  -> "{ i32, [" ++ (show 0) ++ " x " ++ show t ++ "]}"
+    TypeArrayInner t -> "[" ++ (show 0) ++ " x " ++ show t ++ "]"
+    TypeArrayInnerLen len t -> "[" ++ (show len) ++ " x " ++ show t ++ "]"
+    TypePtr t -> show t ++ "*"
+    TypeArrayOfPtr t     -> ""
+    _ -> ""
+
+setArrLen :: LLVMType -> Operand -> LLVMType
+setArrLen (TypeArray _ t) len = TypeArray len t
+
+typeFromPtr :: LLVMType -> LLVMType
+typeFromPtr (TypePtr t) = t
+typeFromPtr t = t
+
+
+
+
+data Operand = OI Identifier | OC Constant | OT LLVMType Operand | ON
 instance Show Operand where
-  show = show
+  show (OI i)   = show i
+  show (OC c)   = show c
+  show (OT t o) = show t ++ " " ++ show o
 
 
-data Identifier = IdentLocal LocalId
-                | IdentGlobal GlobalId
+data Identifier = Local String
+                | Global String
+                | EmptyId
 instance Show Identifier where
-  show (IdentLocal  lid) = show lid
-  show (IdentGlobal gid) = show gid
-getIdentStr (IdentLocal (LocalId str)) = str
-getIdentStr (IdentGlobal (GlobalId str)) = str
-
-
-
-data LocalId = LocalId String
-instance Show LocalId where
-  show (LocalId lid)  = "@" ++ lid
-
-
-data GlobalId = GlobalId String
-instance Show GlobalId where
-  show (GlobalId gid) = "%" ++ gid
+  show (Local  lid) = "%" ++ lid
+  show (Global gid) = "@" ++ gid
 
 
 data Constant = ConstTrue
@@ -36,7 +81,7 @@ instance Show Constant where
   show ConstTrue  = "true"
   show ConstFalse = "false"
   show (ConstDouble d)   = show d
-  show (ConstInteger i) = show i
+  show (ConstInteger i)  = show i
 
 
 data Cond = Eq  -- equal
@@ -49,6 +94,14 @@ data Cond = Eq  -- equal
           | Sge -- signed greater or equal
           | Slt -- signed less than
           | Sle -- signed less or equal
+          | Oeq  -- equal
+          | One  -- not equal
+          | Ogt -- unsigned greater than
+          | Oge -- unsigned greater or equal
+          | Olt -- unsigned less than
+          | Ole -- unsigned less or equal
+
+
 instance Show Cond where
   show c = case c of
     Eq  -> "eq"
@@ -61,6 +114,29 @@ instance Show Cond where
     Sge -> "sge"
     Slt -> "slt"
     Sle -> "sle"
+    Oeq -> "oeq"
+    One -> "one"
+    Ogt -> "ogt"
+    Oge -> "oge"
+    Olt -> "olt"
+    Ole -> "ole"
+
+
+
+
+toOrderedCond :: Cond -> Cond
+toOrderedCond c = case c of
+    Eq  -> Oeq
+    Ne  -> One
+    Ugt -> Ogt
+    Uge -> Oge
+    Ult -> Olt
+    Ule -> Ole
+    Sgt -> Ogt
+    Sge -> Oge
+    Slt -> Olt
+    Sle -> Ole
+
 
 
 data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
@@ -77,13 +153,14 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
                  | Or  LLVMType Operand Operand
 
                  | Allocate LLVMType
-                 | GetElementPtr LLVMType LLVMTypePtr Operand
-                 | Store LLVMType Operand LLVMTypePtr Identifier
-                 | Load  LLVMType Operand LLVMTypePtr Identifier
+                 | AllocateArr LLVMType Operand
+                 | GetElementPtr LLVMType Operand [Operand]
+                 | Store LLVMType Operand LLVMType Identifier
+                 | Load  LLVMType Operand
 
                  | ICmp Cond LLVMType Operand Operand
                  | FCmp Cond LLVMType Operand Operand
-                 | Call LLVMType Identifier [LLVMArg]
+                 | Call LLVMType Identifier LLVMArgs
 
                  | Return LLVMType Operand
                  | ReturnVoid
@@ -92,6 +169,7 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
 
                  | EmptyInstr
                  | ConstInstr Constant
+                 | IdentInstr Identifier
 
 data LLVMLabel = LLVMLabel String
 instance Show LLVMLabel where
@@ -106,7 +184,7 @@ instance Show Instruction where
       FMul t o1 o2 -> "fmul " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       Add  t o1 o2 -> "add "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FAdd t o1 o2 -> "fadd " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
-      SDiv t o1 o2 -> "div "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
+      SDiv t o1 o2 -> "sdiv "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FDiv t o1 o2 -> "fdiv " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       SRem t o1 o2 -> "srem " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       Sub  t o1 o2 -> "sub "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
@@ -116,15 +194,15 @@ instance Show Instruction where
       Or   t o1 o2 -> "or "  ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
 
       Allocate t           -> "alloca " ++ show t
-      GetElementPtr t tp o ->
-        "getelementptr " ++ show t ++ ", " ++ show tp ++ " " ++ show o
+      AllocateArr t i      -> "alloca " ++ show t ++ ", i32 " ++ show i
+      GetElementPtr t ptr inds ->
+        "getelementptr " ++ show (TypePtr t) ++ " " ++ show ptr ++ ", " ++
+        (intercalate ", " $ map show inds)
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
         show tp ++ " " ++ show o2
-      Load t o1 tp o2      ->
-        "load " ++ show t ++ " " ++ show o1 ++ ", " ++
-        show tp ++ " " ++ show o2
-
+      Load tp o ->
+        "load " ++ show tp ++ " " ++ show o
       ICmp c t o1 o2 ->
         "icmp " ++ show c ++ " " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FCmp c t o1 o2 ->
@@ -143,32 +221,45 @@ instance Show Instruction where
       ReturnVoid -> "ret void\n"
 
       CondBranch o l1 l2 ->
-        "br i1" ++
+        "br i1 " ++
         show o ++ ", " ++
-        "label " ++ l1 ++ ", " ++
-        "label " ++ l2
+        "label %" ++ l1 ++ ", " ++
+        "label %" ++ l2
 
       UncondBranch l ->
         "br "    ++
-        "label " ++
-        show l
+        "label %" ++
+        l
+
+      ConstInstr const -> show const
 
       EmptyInstr -> ""
+      IdentInstr i -> show i
 
-data LLVMArg = LLVMArg LLVMType LocalId
+data LLVMArg = LLVMArg LLVMType Operand
 instance Show LLVMArg where
-  show (LLVMArg t aid) = show t ++ " " ++ show aid
+  show (LLVMArg t aid) = typ ++ " " ++ show aid
+    where typ = case t of
+            TypeArray _ _ -> show t ++ "*"
+            _             -> show t
 
 data LLVMArgs = LLVMArgs [LLVMArg]
 instance Show LLVMArgs where
   show (LLVMArgs args) = intercalate ", "  $ map show args
 
-data LLVMFunction = LLVMFunction LLVMType GlobalId LLVMArgs [LLVMStm]
+
+type LLVMTree = [LLVMFunction]
+
+data LLVMFunction = LLVMFunction LLVMType Identifier LLVMArgs [LLVMStm]
 instance Show LLVMFunction where
   show (LLVMFunction t fid args stms) =
-    "define " ++ show t ++ " " ++ show fid ++ "(" ++ show args ++ "){\n" ++
+    "define " ++ typ ++ " " ++ show fid ++ " (" ++ show args ++ ") {\n" ++
     instrsCode ++ "\n}\n\n"
     where instrsCode = concatMap show stms
+          typ = case t of
+            TypeArray _ _ -> show t -- ++ "*"
+            _             -> show t
+
 
 
 data LLVMStm = LLVMStmInstr Instruction

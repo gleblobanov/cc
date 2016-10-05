@@ -11,9 +11,9 @@ generateCode (PDefs defs)
   = globalStrings ++
     declPrintRead ++
     code
-  where code = linearise llvmTree
-        globalStrings = toGlobalVars $ getGlobalStrings env
-        (llvmTree, env) = runEnvState p
-        p = findStrings defs >>=
+  where p = findStrings defs >>=
             collectFuns      >>=
-            flip transform []
+            transform []
+        (llvmTree, env) = runEnvState p
+        globalStrings = toGlobalVars $ getGlobalStrings env
+        code =  linearise llvmTree

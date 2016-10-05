@@ -5,7 +5,7 @@ lens library has facilities that could help with state monads (import Control.Le
 https://hackage.haskell.org/package/lens
 
 
-Why do wee pass source code? Why don't pass a tree in some kind of a standard format?
+Why do we pass source code? Why don't pass a tree in some kind of a standard format?
 
 
 * Questions
@@ -13,7 +13,11 @@ Why do wee pass source code? Why don't pass a tree in some kind of a standard fo
 What is the difference between make and gmake?
 
 
+
 * Tasks 
 
 ** Change make file and introduce dependency 
 SCHEDULED: <2016-07-25 Mon>
+
+If $a^2=b$ and \( b=2 \), then the solution must be
+     either $$ a=+\sqrt{2} $$ or \[ a=-\sqrt{2} \].

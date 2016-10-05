@@ -11,14 +11,15 @@ import System.Environment
 import System.Exit
 import System.IO
 import System.FilePath
+import System.IO.Temp (withTempFile)
 import Data.Char
 import RunCommand
 
 data Backend = Backend {
-			name :: String,
-			objFile :: FilePath -> FilePath,
-			run  :: String -> FilePath -> FilePath -> FilePath -> IO Bool
-		       }
+                        name :: String,
+                        objFile :: FilePath -> FilePath,
+                        run  :: String -> FilePath -> FilePath -> FilePath -> IO Bool
+                       }
 
 --
 -- * Error reporting and output checking
@@ -26,34 +27,34 @@ data Backend = Backend {
 
 reportErrorColor :: Color 
                  -> String -- ^ command that failed
-	         -> String -- ^ how it failed
-	         -> FilePath -- ^ source file
-	         -> String -- ^ given input
-	         -> String -- ^ stdout output
-	         -> String -- ^ stderr output
-	         -> IO ()
+                 -> String -- ^ how it failed
+                 -> FilePath -- ^ source file
+                 -> String -- ^ given input
+                 -> String -- ^ stdout output
+                 -> String -- ^ stderr output
+                 -> IO ()
 reportErrorColor col c m f i o e =
     do
     putStrLn $ color col $ c ++ " failed: " ++ m
     putStrLn $ "For source file " ++ f ++ ":"
     -- prFile f
     when (not (null i)) $ do
-			  putStrLn "Given this input:"
-			  putStrLn $ color blue $ i
+                          putStrLn "Given this input:"
+                          putStrLn $ color blue $ i
     when (not (null o)) $ do
-			  putStrLn "It printed this to standard output:"
-			  putStrLn $ color blue $ o
+                          putStrLn "It printed this to standard output:"
+                          putStrLn $ color blue $ o
     when (not (null e)) $ do
-			  putStrLn "It printed this to standard error:"
-			  putStrLn $ color blue $ e
+                          putStrLn "It printed this to standard error:"
+                          putStrLn $ color blue $ e
 
 reportError :: String -- ^ command that failed
-	    -> String -- ^ how it failed
-	    -> FilePath -- ^ source file
-	    -> String -- ^ given input
-	    -> String -- ^ stdout output
-	    -> String -- ^ stderr output
-	    -> IO ()
+            -> String -- ^ how it failed
+            -> FilePath -- ^ source file
+            -> String -- ^ given input
+            -> String -- ^ stdout output
+            -> String -- ^ stderr output
+            -> IO ()
 reportError = reportErrorColor red
 
 data ErrorReport = ErrorReport {
@@ -90,10 +91,10 @@ report1 (Just rep) = report0 rep >> return False
 
 prFile :: FilePath -> IO ()
 prFile f = do
-	   putStrLn $ "---------------- begin " ++ f ++ " ------------------" 
-	   s <- readFile f
-	   putStrLn $ color green s
-	   putStrLn $ "----------------- end " ++ f ++ " -------------------" 
+           putStrLn $ "---------------- begin " ++ f ++ " ------------------" 
+           s <- readFile f
+           putStrLn $ color green s
+           putStrLn $ "----------------- end " ++ f ++ " -------------------" 
 
 
 -- | Report how many tests passed.
@@ -106,10 +107,10 @@ report n rs =
 --
 
 runProg :: String -- ^ command
-	-> FilePath -- ^ source file (for error reporting)
-	-> FilePath -- ^ known input file
-	-> FilePath -- ^ known output file
-	-> IO Bool
+        -> FilePath -- ^ source file (for error reporting)
+        -> FilePath -- ^ known input file
+        -> FilePath -- ^ known output file
+        -> IO Bool
 runProg c f i o =
     do
     fe <- doesFileExist i
@@ -117,47 +118,47 @@ runProg c f i o =
     output <- readFile o
     (out,err,s) <- runCommandStrWait c input
     case s of
-	   ExitFailure x -> do
-			    reportError c ("with status " ++ show x) f input out err
-			    return False
-	   ExitSuccess -> 
-	       do
-	       if not (null err) then
-		  do
-		  reportError c "Printed something to standard error" f input out err
-		  return False
-	        else if output /= out then
-		     do
-		     putStrLn $ color red $ c ++ " produced the wrong output:"
-		     putStrLn $ "For source file " ++ f ++ ":"
-		     prFile f
-		     when (not (null input)) $ do
-					       putStrLn "Given this input:"
-					       putStrLn $ color blue $ input
-		     putStrLn "It printed this to standard output:"
-		     putStrLn $ color blue $ out
-		     putStrLn "It should have printed this:"
-		     putStrLn $ color blue $ output
-		     return False
-		 else do
-		      putStrLn "output ok"
-		      return True
+           ExitFailure x -> do
+                            reportError c ("with status " ++ show x) f input out err
+                            return False
+           ExitSuccess -> 
+               do
+               if not (null err) then
+                  do
+                  reportError c "Printed something to standard error" f input out err
+                  return False
+                else if output /= out then
+                     do
+                     putStrLn $ color red $ c ++ " produced the wrong output:"
+                     putStrLn $ "For source file " ++ f ++ ":"
+                     prFile f
+                     when (not (null input)) $ do
+                                               putStrLn "Given this input:"
+                                               putStrLn $ color blue $ input
+                     putStrLn "It printed this to standard output:"
+                     putStrLn $ color blue $ out
+                     putStrLn "It should have printed this:"
+                     putStrLn $ color blue $ output
+                     return False
+                 else do
+                      putStrLn "output ok"
+                      return True
 
 testProg :: FilePath -- ^ executable
          -> Backend
-	 -> FilePath -- ^ test file
-	 -> IO Bool
+         -> FilePath -- ^ test file
+         -> IO Bool
 testProg cmd b f = do
     putStr $ "Testing " ++ takeFileName f ++ ": "
     hFlush stdout
     let n = dropExtension f
-	o = n ++ ".output"
+        o = n ++ ".output"
     let c = objFile b f
     ofe <- doesFileExist o
     if ofe then run b c f (n ++ ".input") o
        else do
-	    putStrLn $ color blue $ "skipping: " ++ o ++ " not found"
-	    return True
+            putStrLn $ color blue $ "skipping: " ++ o ++ " not found"
+            return True
 
 test :: FilePath -> [FilePath] -> Backend -> IO [Bool]
 test c fs b =
@@ -201,10 +202,10 @@ objFileJVM f = dropExtension f
 
 runJVM ::  String -- libpath
          -> String -- ^ Java class file
-	 -> FilePath -- ^ source file (for error reporting)
-	 -> FilePath -- ^ known input file
-	 -> FilePath -- ^ known output file
-	 -> IO Bool
+         -> FilePath -- ^ source file (for error reporting)
+         -> FilePath -- ^ known input file
+         -> FilePath -- ^ known output file
+         -> IO Bool
 
 runJVM libPath classFile src inp outp = do
   let dir  = takeDirectory classFile
@@ -215,26 +216,52 @@ runJVM libPath classFile src inp outp = do
   return result
 
 jvmBackend libpath = Backend { name = "JVM", objFile = objFileJVM, 
-			 run = runJVM libpath }
+                         run = runJVM libpath }
 
 --
 -- * LLVM back-end
 --
 objFileLLVM f = dropExtension f <.> "bc"
 
-runLLVM ::  String -- libpath
-         -> String -- ^ LLVM bitcode file
-	 -> FilePath -- ^ source file (for error reporting)
-	 -> FilePath -- ^ known input file
-	 -> FilePath -- ^ known output file
-	 -> IO Bool
+linkLLVM :: String -> FilePath -> FilePath -> IO ()
+linkLLVM ver libPath bcFile = do
+  ec <- system "which llvm-ld"
+  case ec of
+    ExitSuccess -> linkLegacyLLVM
+    _           -> linkModernLLVM
+  where
+    -- use llvm-ld if it exists...
+    linkLegacyLLVM =
+      void $ system ("llvm-ld" ++ ver ++ " " ++ bcFile ++ " " ++ libPath </> runtimeBitcode)
 
-runLLVM libPath bcFile src inp outp = do
+    -- ...otherwise use llvm-link + gcc
+    linkModernLLVM = withTempFile "." "a.s" $ \file h -> void $ do
+      hClose h
+      system $ intercalate " | "
+        [ "llvm-link" ++ ver ++ " " ++ bcFile ++ " " ++ libPath </> runtimeBitcode
+        , "opt" ++ ver
+        , "llc" ++ ver ++ " > " ++ file
+        ]
+      system ("gcc -oa.out " ++ file)
+
+    -- bitcode file containing the runtime
+    runtimeBitcode = "runtime.bc"
+
+
+runLLVM ::  String -- LLVM version suffix
+         -> String -- libpath
+         -> String -- ^ LLVM bitcode file
+         -> FilePath -- ^ source file (for error reporting)
+         -> FilePath -- ^ known input file
+         -> FilePath -- ^ known output file
+         -> IO Bool
+
+runLLVM ver libPath bcFile src inp outp = do
   let dir  = takeDirectory bcFile
   d0  <- System.Directory.getCurrentDirectory
   setCurrentDirectory dir
   killFile ("a.out")
-  system ("llvm-ld " ++ bcFile ++ " " ++ libPath ++"/runtime.bc")
+  linkLLVM ver libPath bcFile
   result <- runProg "./a.out" src inp outp
   setCurrentDirectory d0
   return result
@@ -245,8 +272,10 @@ killFile f = do b <- doesFileExist f
                  else
                    return ()
 
-llvmBackend libpath = Backend { name = "LLVM", objFile = objFileLLVM, 
-			 run = runLLVM libpath }
+llvmBackend ver libpath = Backend 
+  { name    = "LLVM"
+  , objFile = objFileLLVM
+  , run     = runLLVM ver libpath }
 
 --
 -- * x86 back-end

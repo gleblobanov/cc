@@ -16,14 +16,16 @@ transStms (s:ss) =
     SReturn rst    -> transSReturn rst
     SWhile e stm   -> transSWhile e stm ss
     SBlock stms    -> transSBlock stms ss
+    SForeach t ind arr stm -> transSForeach t ind arr stm ss
     SIf e rst      -> transSIf e rst ss
 
 
 
 transSExp :: Exp -> [Stm] -> EnvState Env [LLVMStm]
-transSExp e ss = do (instr, expStms) <- transExp e
+transSExp e ss = do (_, expStms) <- transExp e
                     restStms <- transStms ss
                     return $ expStms ++ restStms
+
 
 
 transSDecls :: Type -> [Id] -> [Stm] -> EnvState Env [LLVMStm]
@@ -33,53 +35,107 @@ transSDecls t ids ss = do declStms <- transDecl t ids
 
 transDecl :: Type -> [Id] -> EnvState Env [LLVMStm]
 transDecl _ []  = return []
-transDecl t (vid:vids) = do stm  <- mkDeclStm t vid
-                            stms <- transDecl t vids
-                            return (stm:stms)
+transDecl t (vid:vids) = do stms  <- mkDeclStm t vid
+                            stms' <- transDecl t vids
+                            return $ stms ++ stms'
 
-mkDeclStm :: Type -> Id -> EnvState Env LLVMStm
-mkDeclStm t vid = do (ident, t') <- extendVar vid t
+
+mkDeclStm :: Type -> Id -> EnvState Env [LLVMStm]
+mkDeclStm t@(TypeArr t' brs) vid = do extendVarDeclArr vid t brs
+                                      return []
+mkDeclStm t vid = do (OI ptr, TypePtr t') <- extendVarDecl vid t
                      let allInstr = Allocate t'
-                         stm      = LLVMStmAssgn ident allInstr
-                     return stm
+                         allstm   = LLVMStmAssgn ptr allInstr
+                         val = OC $ case t' of
+                           TypeInteger -> ConstInteger 0
+                           TypeDouble  -> ConstDouble 0.0
+                           TypeBoolean -> ConstFalse
+                         sStore   = LLVMStmInstr (Store t' val (TypePtr t') ptr)
+                     return [allstm, sStore]
 
 
+getLenInbr (InBr (EInt i)) = i
 
 transSInit :: Type -> [Id] -> Exp -> [Stm] -> EnvState Env [LLVMStm]
-transSInit t ids e ss = do (instr, expStms) <- transExp e
-                           cnt <- getCounter
-                           let tmp    = IdentLocal (LocalId $ "tmp" ++ show cnt)
-                               sInstr = LLVMStmAssgn tmp instr
-                           initStms <- mkInitStms t ids tmp
-                           restStms <- transStms ss
-                           return $ expStms ++ [sInstr] ++ initStms ++ restStms
+transSInit (TypeArr typ ebr) [vid] (ENew _ (inbr:[])) stms = -- ptr t'@(TypeArray len _) =
+  do (OI ptr, TypePtr t) <- extendVarDeclArr vid typ ebr
+     arrPtr <- genLocal
+     call   <- genLocal
+     load   <- genLocal
+     let len = (OC $ ConstInteger $ getLenInbr inbr)
+         t' = setArrLen t len
+         allInstr = Allocate t'
+         sAlloc   = LLVMStmAssgn ptr allInstr
+         sArrPtr = LLVMStmAssgn arrPtr $
+           GetElementPtr t (OI ptr)
+           [OT TypeInteger (OC $ ConstInteger 0),
+           OT TypeInteger (OC $ ConstInteger 1)]
 
-mkInitStms :: Type -> [Id] -> Identifier -> EnvState Env [LLVMStm]
-mkInitStms _ [] _ = return []
-mkInitStms t (vid:vids) tmp = do stms     <- mkInitStm t vid tmp
-                                 stmsRest <- mkInitStms t vids tmp
-                                 return (stms ++ stmsRest)
+         sCall = LLVMStmAssgn call $
+           Call (TypeArrayInner TypeInteger) (Global "calloc")
+           (LLVMArgs [LLVMArg TypeInteger len, LLVMArg TypeInteger (OC $ ConstInteger 1)])
 
-mkInitStm :: Type -> Id -> Identifier -> EnvState Env [LLVMStm]
-mkInitStm t vid tmp = do (identPtr, t') <- extendVar vid t
-                         let allInstr = Allocate t'
-                             sAlloc   = LLVMStmAssgn identPtr allInstr
-                             tPtr'    = typeToPtr t'
-                             sStore   = LLVMStmInstr (Store t' (OI tmp) tPtr' identPtr)
-                         return [sAlloc, sStore]
+         sLoadCall = LLVMStmAssgn load $ Load
+           (TypeArrayInner TypeInteger)
+           (OI call)
+
+         sStore   = LLVMStmInstr (Store
+                                  (TypeArrayInner TypeInteger) (OI load)
+                                  (TypePtr (TypeArrayInner TypeInteger)) arrPtr)
+     return [sAlloc, sArrPtr, sCall, sLoadCall, sStore]
+
+transSInit t ids e ss = do ((ptr, t'), expStms) <- transExp e
+                           initStms             <- mkInitStms t ids ptr t'
+                           restStms             <- transStms ss
+                           return $ expStms ++ initStms ++ restStms
+
+
+
+mkInitStms :: Type -> [Id] -> Operand -> LLVMType -> EnvState Env [LLVMStm]
+mkInitStms _ [] _ _ = return []
+mkInitStms t (vid:vids) val t' = do stms     <- mkInitStm t vid val t'
+                                    stmsRest <- mkInitStms t vids val t'
+                                    return (stms ++ stmsRest)
+
+
+mkInitStm :: Type -> Id -> Operand -> LLVMType -> EnvState Env [LLVMStm]
+mkInitStm t vid val _ = do (OI ptr, TypePtr t') <- extendVarDecl vid t
+                           let allInstr = Allocate t'
+                               sAlloc   = LLVMStmAssgn ptr allInstr
+                               sStore   = LLVMStmInstr (Store t' val (TypePtr t') ptr)
+                           return [sAlloc, sStore]
+
+
+
+
+transAssArr :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
+transAssArr (EIdArr vid [InBr e1]) e2 =
+  do
+    ((ind, _), e1Stms) <- transExp e1
+    ((val, _), e2Stms) <- transExp e2
+    (arrStrPtr, arrStrType, arrElemType) <- lookupArr vid
+    xPtr <- genLocal
+    let xPtrGet = LLVMStmAssgn xPtr $ GetElementPtr
+          arrStrType arrStrPtr [OC $ ConstInteger 1,
+                                ind]
+
+        xStore = LLVMStmInstr $ Store arrElemType val arrElemType xPtr
+    return ((val, arrElemType), e1Stms ++ e2Stms ++ [xPtrGet, xStore])
 
 
 
 
 transSReturn :: ReturnRest ->  EnvState Env [LLVMStm]
 transSReturn rest = case rest of
-  ReturnRest e -> do (instr, expStms) <- transExp e
+  ReturnRest e -> do ((val, t'), expStms) <- transExp e
                      t <- getType
-                     cnt <- getCounter
-                     let tmp    = IdentLocal (LocalId $ "tmp" ++ show cnt)
-                         sInstr = LLVMStmAssgn tmp instr
-                         retStm = LLVMStmInstr (Return t (OI tmp))
-                     return $ expStms ++ [sInstr, retStm]
+                     case t' of
+                       TypeArray _ _ -> do res <- genLocal
+                                           let resLoad = LLVMStmAssgn res $ Load t' val
+                                               retStm  = LLVMStmInstr (Return t $ OI res)
+                                           return $ expStms ++ [resLoad, retStm]
+                       _ -> let retStm = LLVMStmInstr (Return t val)
+                            in return $ expStms ++ [retStm]
   ReturnRestEmpt -> return [LLVMStmInstr ReturnVoid]
 
 
@@ -92,25 +148,24 @@ transSWhile e stm ss = do whileStms <- transWhile e stm
                           return $ whileStms ++ restStms
 
 transWhile :: Exp -> Stm -> EnvState Env [LLVMStm]
-transWhile e stm = do (instr, expStms) <- transExp e
+transWhile e stm = do ((val, t), expStms) <- transExp e
                       stms <- transStms [stm]
                       c1 <- getCounter
                       c2 <- getCounter
                       c3 <- getCounter
                       ct <- getCounter
-                      let l1  = LLVMLabel $ show c1
+                      let l1  = LLVMLabel $ "lab" ++ show c1
                           sl1 = LLVMStmLabel l1
-                          l2  = LLVMLabel $ show c2
+                          l2  = LLVMLabel $ "lab" ++ show c2
                           sl2 = LLVMStmLabel l2
-                          l3  = LLVMLabel $ show c3
+                          l3  = LLVMLabel $ "lab" ++ show c3
                           sl3 = LLVMStmLabel l3
-                          tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                          sInstr    = LLVMStmAssgn tmp instr
-                          condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l2) (show l3))
-                          uncondStm = LLVMStmInstr (UncondBranch (show l1))
-                          res = [sl1]       ++
+                          condStm   = LLVMStmInstr (CondBranch val (show l2) (show l3))
+                          uncondStm  = LLVMStmInstr (UncondBranch (show l1))
+                          res =
+                                [uncondStm] ++ -- TODO Remove it and look what happens
+                                [sl1]       ++
                                  expStms    ++
-                                [sInstr]    ++
                                 [condStm]   ++
                                 [sl2]       ++
                                  stms       ++
@@ -133,63 +188,138 @@ transBlock stms = do newBlock
                      return stms'
 
 
+-- TODO In brackets could be expression
+transSForeach :: Type -> Id -> Id -> Stm -> [Stm] -> EnvState Env [LLVMStm]
+transSForeach t ind arr stm stms = do foreachStms <- transForeach t ind arr stm
+                                      restStms  <- transStms stms
+                                      return $ foreachStms ++ restStms
+
+
+transForeach :: Type -> Id -> Id -> Stm -> EnvState Env [LLVMStm]
+transForeach t ind' arr stm = do
+  newBlock
+  (arrStrPtr, arrStrType, arrElemType) <- lookupArr arr
+  indPtr <- genLocal
+  let indPtrAlloc = LLVMStmAssgn indPtr $ Allocate TypeInteger
+      indPtrStore = LLVMStmInstr $ Store TypeInteger (OC $ ConstInteger 0) TypeInteger indPtr
+
+  lenPtr <- genLocal
+  len    <- genLocal
+  let lenPtrGet   = LLVMStmAssgn lenPtr $ GetElementPtr
+        arrStrType arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                            OT arrElemType $ OC $ ConstInteger 0]
+      lenLoad     = LLVMStmAssgn len $ Load TypeInteger (OI lenPtr)
+
+  c1 <- getCounter
+  c2  <- getCounter
+  c3  <- getCounter
+  let l1 = LLVMLabel $ "lab" ++ show c1
+      sl1 = LLVMStmLabel l1
+      l2 = LLVMLabel $ "lab" ++ show c2
+      sl2 = LLVMStmLabel l2
+      l3 = LLVMLabel $ "lab" ++ show c3
+      sl3 = LLVMStmLabel l3
+      uncond1 = LLVMStmInstr (UncondBranch (show l1))
+
+  ind   <- genLocal
+  check <- genLocal
+  x     <- genLocal
+  extendVar ind' (OI x) arrElemType
+  let indLoad = LLVMStmAssgn ind $ Load TypeInteger (OI indPtr)
+      checkCmp = LLVMStmAssgn check $ ICmp Slt TypeInteger (OI ind) (OI len)
+      br = LLVMStmInstr $ CondBranch (OI check) (show l2) (show l3)
+
+      -- xPtrGetElPtr = LLVMStmAssgn xPtr $
+      --   GetElementPtr arrType
+      --   arrPtr (OT TypeInteger (OC (ConstInteger 0)))
+      --   (OT TypeInteger $ OI ind)
+
+      -- xLoad     = LLVMStmAssgn x $ Load arrElemType (OI xPtr)
+      xPtrGetElPtr = LLVMStmAssgn x $
+        GetElementPtr arrStrType arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                                            OT TypeInteger $ OC $ ConstInteger 1,
+                                            OT arrElemType $ OI ind]
+
+
+  bodyStms <- transStms [stm]
+
+  indIncr <- genLocal
+  exitBlock
+  let indIncrAdd = LLVMStmAssgn indIncr $ Add TypeInteger (OI ind) (OC $ ConstInteger 1)
+      indStore   = LLVMStmInstr $ Store TypeInteger (OI indIncr) TypeInteger indPtr
+
+  return $ [indPtrAlloc,
+            indPtrStore,
+            lenPtrGet,
+            lenLoad,
+            uncond1,
+            sl1,
+            indLoad,
+            checkCmp,
+            br,
+            sl2,
+            xPtrGetElPtr] ++
+            bodyStms ++
+           [indIncrAdd,
+            indStore,
+            uncond1,
+            sl3]
+
+
 
 transSIf :: Exp -> IfRest -> [Stm] -> EnvState Env [LLVMStm]
 transSIf e r ss = do ifStms <- transIf e r
                      restStms  <- transStms ss
                      return $ ifStms ++ restStms
 
+-- TODO Merge two branches effectively
 transIf :: Exp -> IfRest -> EnvState Env [LLVMStm]
 transIf e r = case r of
   IfR stm rr -> case rr of
-    IfRREl stmEl -> do (instr, expStms) <- transExp e
+    IfRREl stmEl -> do ((val, t), expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        c3 <- getCounter
                        ct <- getCounter
                        stms   <- transStms [stm]
                        stmsEl <- transStms [stmEl]
-                       let l1  = LLVMLabel $ show c1
+                       let l1  = LLVMLabel $  "lab" ++ show c1
                            sl1 = LLVMStmLabel l1
-                           l2  = LLVMLabel $ show c2
+                           l2  = LLVMLabel $  "lab" ++ show c2
                            sl2 = LLVMStmLabel l2
-                           l3  = LLVMLabel $ show c3
+                           l3  = LLVMLabel $  "lab" ++ show c3
                            sl3 = LLVMStmLabel l3
-                           tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                           sInstr    = LLVMStmAssgn tmp instr
-                           condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l1) (show l2))
+                           condStm   = LLVMStmInstr (CondBranch val (show l1) (show l2))
                            uncondStm = LLVMStmInstr (UncondBranch (show l3))
                            res = expStms    ++
-                                [sInstr]    ++
                                 [condStm]   ++
                                 [sl1]       ++
                                  stms       ++
                                 [uncondStm] ++
                                 [sl2]       ++
                                  stmsEl     ++
+                                [uncondStm] ++
                                 [sl3]
                        return res
 
-    IfRRE        -> do (instr, expStms) <- transExp e
+    IfRRE        -> do ((val, t), expStms) <- transExp e
                        c1 <- getCounter
                        c2 <- getCounter
                        ct <- getCounter
                        stms   <- transStms [stm]
-                       let l1  = LLVMLabel $ show c1
+                       let l1  = LLVMLabel $ "lab" ++  show c1
                            sl1 = LLVMStmLabel l1
-                           l2  = LLVMLabel $ show c2
+                           l2  = LLVMLabel $ "lab" ++  show c2
                            sl2 = LLVMStmLabel l2
-                           tmp       = IdentLocal (LocalId $ "tmp" ++ show ct)
-                           sInstr    = LLVMStmAssgn tmp instr
-                           condStm   = LLVMStmInstr (CondBranch (OI tmp) (show l1) (show l2))
+                           condStm   = LLVMStmInstr (CondBranch val (show l1) (show l2))
+                           uncondStm = LLVMStmInstr (UncondBranch (show l2))
                            res = expStms    ++
-                                [sInstr]    ++
                                 [condStm]   ++
                                 [sl1]       ++
                                  stms       ++
+                                [uncondStm]  ++
                                 [sl2]
                        return res
 
-  IfRE -> do (instr, expStms) <- transExp e
-             let sInstr = LLVMStmInstr instr
-             return $ expStms ++ [sInstr]
+  IfRE -> do ((vid, t), expStms) <- transExp e
+             return expStms

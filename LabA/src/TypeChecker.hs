@@ -79,6 +79,10 @@ updateFun (sig, ctxs) f typ =
 newBlock :: Env -> Env
 newBlock (sig, ctxs) = (sig, emptyContext:ctxs)
 
+
+exitBlock :: Env -> Env
+exitBlock (sig, ctxs) = (sig, tail ctxs)
+
 -- | Returns an empty environment.
 emptyEnv :: Env
 emptyEnv = (emptySig, [emptyContext])
@@ -110,7 +114,8 @@ typecheck (PDefs defs) =
               (Id "printInt", ([Type_int], Type_void)),
               (Id "printDouble", ([Type_double], Type_void)),
               (Id "printString", ([Type_string], Type_void)),
-              (Id "readInt", ([], Type_int))
+              (Id "readInt", ([], Type_int)),
+              (Id "readDouble", ([], Type_double))
              ]
 
           globalenv <- foldM
@@ -122,13 +127,13 @@ typecheck (PDefs defs) =
 
           mapM
                 (\(DFun outtyp id args stms)  ->
-                   let
-                        retType = case outtyp of
-                                Type_void -> Nothing
-                                _ -> Just outtyp
-                        in do
-
-                           fbdyenv <-
+                   if (id `elem` [Id "if", Id "while", Id "for"])
+                      then fail $ "if " ++ "is a keyword."
+                      else let
+                             retType = case outtyp of
+                                         Type_void -> Nothing
+                                         _ -> Just outtyp
+                           in do fbdyenv <-
                                    foldM
                                         (\env (ADecl atyp aid) ->
                                               updateVar env aid atyp
@@ -136,12 +141,12 @@ typecheck (PDefs defs) =
                                          (newBlock globalenv)
                                          args
 
-                           hr <- typecheckStms fbdyenv retType stms $ if (isJust retType)
+                                 hr <- typecheckStms fbdyenv retType stms $ if (isJust retType)
                                                                 then  checkRet stms
                                                                 else  False
-                           if outtyp /= Type_void && not hr
-                           then fail "No return."
-                           else return ()
+                                 if outtyp /= Type_void && not hr
+                                  then fail "No return."
+                                  else return ()
                 )
                 defs
           return ()
@@ -213,6 +218,27 @@ typecheckStms env typ (stm:stms) cR = case stm of
                       r2 <- typecheckStms env typ stms cR
                       return $ r1 || r2
 
+              SForeach typ' id1 id2 stms' -> do
+                       id2t <- lookupVar env id2
+                       if (not $ isArr id2t)
+                        then fail $ show id2 ++ "Not an array."
+                        else do env' <- updateVar (newBlock env) id1 typ'
+                                let id2t' = typeFromArr id2t
+                                if id2t' /= typ'
+                                 then fail "Wrong type in foreach."
+                                 else do r1 <- typecheckStms env' typ [stms'] cR
+                                         r2 <- typecheckStms (exitBlock env') typ stms cR
+                                         return $ r1 || r2
+
+
+isArr (TypeArr _ _) = True
+isArr _ = False
+
+typeFromArr :: Type -> Type
+typeFromArr (TypeArr t _) = t
+typeFromArr t = t
+
+
 -- | Checks if if-else statement is of a correct type.
 typecheckIf :: Env -> Maybe Type -> [Stm] ->
                Exp -> IfRest -> CheckReturn -> Err HasReturn
@@ -276,10 +302,17 @@ typecheckExp env typ exp = do
              if isBool typ
              then if isBool typ2
                   then return typ2
-                  else fail $ "type of " ++ printTree exp
-             else if typ2 == typ
-                  then return typ2
-                  else fail $ "type of " ++ printTree exp
+                  else fail $ "1 type of " ++ printTree exp
+             else if typ == typ2
+                  then return typ
+                  else case typ of
+                     TypeArr t _ -> if typ2 == t
+                                    then return typ
+                                    else fail $ "21 type of " ++ printTree exp
+
+                     _ -> if typ2 == typ
+                          then return typ2
+                          else fail $ "22 type of " ++ printTree exp
 
 isBool :: Type -> Bool
 isBool = flip elem [Type_true, Type_false, Type_boolean]
@@ -293,7 +326,13 @@ inferExp env x = case x of
          EDouble d -> return Type_double
          EString _ -> return Type_string
 
-         EId id  -> lookupVar env id
+         EId id      -> lookupVar env id
+         -- EId id      -> do t <- lookupVar env id
+         --                   case t of
+         --                     TypeArr t' _ -> return t'
+         --                     _            -> return t
+         EIdArr id _ -> do TypeArr t _ <- lookupVar env id
+                           return t
          EApp id exps -> inferApp env id exps
          ENeg exp -> do t <- inferExp env exp
                         if t == Type_int || t == Type_double
@@ -314,7 +353,7 @@ inferExp env x = case x of
          EMod e1 e2 -> do t1 <- inferExp env e1
                           t2 <- inferExp env e2
                           if t1 == Type_int && t2 == Type_int
-                          then return Type_int 
+                          then return Type_int
                           else fail "An argument of mod\
                                   \has a different type, not int."
          EPlus exp0 exp -> inferArithmBin env exp0 exp
@@ -333,8 +372,14 @@ inferExp env x = case x of
               if (typa == typb) then
                  return typa
               else
-                 fail $ "type of " ++ printTree a
+                 fail $ "3 type of " ++ printTree a
+         ENew    t i -> return t
+         ELength e -> do typ <- inferExp env e
+                         case typ of
+                             TypeArr _ _-> return Type_int
+                             _       -> fail "Wrong argument of length"
          _ -> fail $ "Unknown expression" ++ show x
+
 
 inferArithmBin :: Env -> Exp -> Exp -> Err Type
 inferArithmBin env a b = do
@@ -342,7 +387,7 @@ inferArithmBin env a b = do
     if elem typ [Type_int, Type_double] then do
         typecheckExp env typ b
       else
-        fail $ "type of expression " ++ printTree a
+        fail $ "4 type of expression " ++ printTree a
 
 inferBoolBin :: Env -> Exp -> Exp -> Err Type
 inferBoolBin env a b = do
@@ -351,14 +396,16 @@ inferBoolBin env a b = do
     if isBool typa
     then if isBool typb
          then return Type_boolean
-         else fail $ "type of expression " ++ printTree a
+         else fail $ "5 type of expression " ++ printTree a
     else if isBool typb
          then if isBool typa
               then return Type_boolean
-              else fail $ "type of expression " ++ printTree a
+              else fail $ "6 type of expression " ++ printTree a
          else if (typa == typb) 
               then return Type_boolean
-              else fail $ "type of expression " ++ printTree a
+              else fail $ "7 type of expression " ++ show typa ++ " " ++ show typb ++ printTree a
+
+
 
 inferApp :: Env -> Id -> [Exp] -> Err Type
 inferApp env id exps = do
@@ -369,6 +416,6 @@ inferIncr :: Env -> Exp -> Err Type
 inferIncr env a = do
           type' <- inferExp env a
           if (isBool type') then
-             fail $ "type of expression " ++ printTree a
+             fail $ "8 type of expression " ++ printTree a
           else
              return type'

@@ -1,32 +1,71 @@
 module Functions where
 
+import qualified AbsJL as JL
+import LLVMSyntax
+import Environment
+import LLVMStms
+import Control.Monad
+import LLVMTypes
 
--- compileFun :: Env -> Def -> Code
--- compileFun env (DFun _ (Id "main" ) _ stms) =
---     ".method public static main()I\n\n"
---     ++ "   .limit locals " ++ show $ getAddr env' ++ "\n"
---     ++ "   .limit stack " ++ show $ getStack env' ++ "\n"
---     ++ addReturn code Type_int
---     ++ ".end method\n\n"
---         where (code, env') = compileStms env stms
+putStmsToFun :: LLVMFunction -> [LLVMStm] -> LLVMFunction
+putStmsToFun (LLVMFunction t fid args _) = LLVMFunction t fid args
 
 
--- compileFun env (DFun t (Id id) args stms) =
---     ".method public static " ++ id ++ "(" ++ targs ++ ")" ++ t' ++"\n"
---     ++ "   .limit locals " ++ show $ getAddr env'' ++ "\n"
---     ++ "   .limit stack " ++ show $ getStack env'' ++ "\n"
---     ++ addReturn code t
---     ++ ".end method\n\n"
---         where (code, env'') = compileStms env' stms
---               t'     = typeToLetter t
---               targs  = argsToString args
---               env'   = extendArgs env args
+putFunToTree :: LLVMTree -> LLVMFunction -> EnvState Env LLVMTree
+putFunToTree tree fun =
+  EnvState (\env -> (tree ++ [fun], env))
 
+
+transFun :: LLVMTree -> JL.Def -> EnvState Env LLVMTree
+transFun tree (JL.DFun t (JL.Id fid) args stms) =
+  do cnt <- getCounter
+     fns <- getFuns
+     let t' = transType t
+     putType t'
+     case lookup (JL.Id fid) fns of
+       Just (_, _, LLVMArgs args') ->
+        do allocStms <- mapM allocateArg $ zip args args'
+           stms' <- transStms stms
+           let fun = LLVMFunction t' (Global fid) (LLVMArgs args') []
+               entryStm = LLVMStmLabel $ LLVMLabel "entry"
+               retStm   = LLVMStmInstr $ case t' of
+                 TypeVoid -> ReturnVoid
+                 TypeInteger -> Return t' (OC $ ConstInteger 0)
+                 TypeDouble   -> Return t' (OC $ ConstDouble 0.0)
+               stmsToAdd = concat allocStms ++ stms'
+                 ++ if null stms'
+                    then [retStm]
+                    else case last stms' of
+                 LLVMStmInstr (Return _ _) -> []
+                 LLVMStmInstr ReturnVoid -> []
+                 _ -> [retStm]
+               fun' = putStmsToFun fun $ entryStm : stmsToAdd
+           putFunToTree tree fun'
+
+       Nothing -> fail $ "Function isn't found " ++ show fid
+
+
+-- extendArgs :: [(Arg, LLVMArg)] -> EnvState Env [LLVMStm]
+-- extendArgs = do
+--   cn
+--   in foldr ((>>). (\(ADecl _ aid, LLVMArg t val) ->
+--                             extendVar aid val t)) (return ())
+
+allocateArg :: (JL.Arg, LLVMArg) -> EnvState Env [LLVMStm]
+allocateArg (JL.ADecl typ aid, LLVMArg typ' op) =
+  do ptr <- genLocal
+     -- let stm1 = LLVMStmAssgn ptr (Allocate typ')
+     --     stm2 = LLVMStmInstr $ Store typ' op typ' ptr
+     -- extendVar aid (OI ptr) typ'
+     extendVar aid op typ'
+     return []
+     -- return [stm1, stm2]
 
 declPrintRead :: String
 declPrintRead = "declare void @printInt(i32)\n\
-                          \declare void @printDouble(double)\n\
-                          \declare void @printString(i8*)\n\
-                          \declare i32 @readInt()\n\
-                          \declare double @readDouble()\n"
+                \declare void @printDouble(double)\n\
+                \declare void @printString(i8*)\n\
+                \declare i32 @readInt()\n\
+                \declare double @readDouble()\n\
+                \declare [0 x i32]* @calloc(i32, i32)\n"
 

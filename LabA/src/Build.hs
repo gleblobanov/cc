@@ -22,45 +22,45 @@ mainO     :: FilePath
 mainO     = "main.o"
 
 
-produceAssembly :: String
-produceAssembly =
+produceAssembly :: String -> String
+produceAssembly fn =
   "llvm-as" ++ " "   ++
-  progLL    ++ " ; " ++
+  fn ++ ".ll"    ++ " ; " ++
   "llvm-as" ++ " "   ++
   runtimeLL
 
 
-produceLink :: String
-produceLink =
+produceLink :: String -> String
+produceLink fn =
   "llvm-link" ++ " " ++
-  progBC      ++ " " ++
-  runtimeBC   ++ " " ++
-  "-o "       ++ " " ++
-  mainBC
+  fn ++  ".bc"    ++ " " ++
+  runtimeBC ++ " "
+  ++ "-o " ++  "a.out"
 
 
-produceObject :: String
-produceObject =
+produceObject :: String -> String
+produceObject fn =
   "llc -filetype=obj" ++ " " ++
-  mainBC
+  "a.out"
 
-produceExec :: String
-produceExec =
+produceExec :: String -> String
+produceExec fn =
   "gcc" ++ " " ++
-  mainO
-
-
-linkCommands :: [String]
-linkCommands = [produceAssembly,
-                produceLink]
+  "-w"  ++ " " ++
+  "a.out.o"
 
 
 
-buildCommands :: [String]
-buildCommands = [produceAssembly,
-                 produceLink,
-                 produceObject,
-                 produceExec]
+linkCommands :: String -> [String]
+linkCommands fn = [produceAssembly fn,
+                   produceLink fn]
+
+
+
+buildCommands :: String -> [String]
+buildCommands fn = [produceAssembly fn,
+                 produceLink fn,
+                 produceObject fn, produceExec fn]
 
 
 runCmd :: String -> IO ExitCode
@@ -68,10 +68,10 @@ runCmd cmd = do h <- runCommand cmd
                 waitForProcess h
 
 
-build :: IO ()
-build = mapM_ runCmd buildCommands
+build :: String -> IO ()
+build fn = mapM_ runCmd (buildCommands fn)
 
 
-link :: IO ()
-link = mapM_ runCmd linkCommands
+link :: String -> IO ()
+link fn = mapM_ runCmd (linkCommands fn)
 
