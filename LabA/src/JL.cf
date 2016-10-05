@@ -75,7 +75,7 @@ rules Type   ::= "true" | "false" | "int" | "double" | "void" | "string" | "bool
 TypeArr. Type ::= Type [EmptBr] ;
 
 EmptBr. EmptBr ::= "[" "]" ;
-separator EmptBr "" ;
+separator nonempty EmptBr "" ;
 
 InBr.   InBr   ::= "[" Exp "]" ;
 separator nonempty InBr "" ;

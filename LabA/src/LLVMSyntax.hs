@@ -22,7 +22,8 @@ data LLVMType = TypeInteger
               | TypeFunction LLVMType [LLVMType]
               | TypeStructure [LLVMType]
               | TypeArray Operand LLVMType
-              | TypeArrayInner LLVMType
+              | TypeArrayInner LLVMType -- Array with 0 length
+              | TypeArrayInnerLen Integer LLVMType -- Array with a specified length
               | TypePtr LLVMType
               | TypeArrayOfPtr [LLVMType]
               | None
@@ -42,10 +43,13 @@ instance Show LLVMType where
     -- TypeArray len t  -> "{ i32, [ 0 x " ++ show t ++ "]}"
     TypeArray len t  -> "{ i32, [" ++ (show 0) ++ " x " ++ show t ++ "]}"
     TypeArrayInner t -> "[" ++ (show 0) ++ " x " ++ show t ++ "]"
+    TypeArrayInnerLen len t -> "[" ++ (show len) ++ " x " ++ show t ++ "]"
     TypePtr t -> show t ++ "*"
     TypeArrayOfPtr t     -> ""
     _ -> ""
 
+setArrLen :: LLVMType -> Operand -> LLVMType
+setArrLen (TypeArray _ t) len = TypeArray len t
 
 typeFromPtr :: LLVMType -> LLVMType
 typeFromPtr (TypePtr t) = t
@@ -196,9 +200,9 @@ instance Show Instruction where
         (intercalate ", " $ map show inds)
       Store t o1 tp o2     ->
         "store " ++ show t ++ " " ++ show o1 ++ ", " ++
-        show (TypePtr tp) ++ " " ++ show o2
+        show tp ++ " " ++ show o2
       Load tp o ->
-        "load " ++ show (TypePtr tp) ++ " " ++ show o
+        "load " ++ show tp ++ " " ++ show o
       ICmp c t o1 o2 ->
         "icmp " ++ show c ++ " " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FCmp c t o1 o2 ->

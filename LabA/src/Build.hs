@@ -52,8 +52,8 @@ produceExec fn =
 
 
 linkCommands :: String -> [String]
-linkCommands fn = [produceAssembly fn] --,
-                -- produceLink fn]
+linkCommands fn = [produceAssembly fn,
+                   produceLink fn]
 
 
 

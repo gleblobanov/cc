@@ -69,7 +69,7 @@ transString s = do cnt <- getCounter
                    env <- get
                    let gs = getGlobalStrings env
                    case lookup s gs of
-                     Just (gid, len) -> do let ta = TypeArray (OC $ ConstInteger len) TypeChar
+                     Just (gid, len) -> do let ta = TypeArrayInnerLen len TypeChar
                                                o  = OI gid
                                                o' = OT TypeInteger (OC (ConstInteger 0))
                                                inst = GetElementPtr ta o [o', o']
@@ -94,10 +94,10 @@ transIdPtr vid = do (ptr, typ) <- lookupVar vid
 transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transId vid = do (ptr, typ) <- lookupVar vid
                  case typ of
-                   TypeArray _ _ -> return ((ptr, typ), [])
-                   _ -> do val <- genLocal
-                           let s = LLVMStmAssgn val $ Load typ ptr
-                           return ((OI val, typ), [s])
+                   TypePtr t -> do val <- genLocal
+                                   let s = LLVMStmAssgn val $ Load typ ptr
+                                   return ((OI val, t), [s])
+                   _        -> return ((ptr, typ), [])
 
                    -- _ -> do val <- genLocal
                    --         let s = LLVMStmAssgn val $ Load typ ptr
@@ -253,14 +253,14 @@ transNot e =
          brStm = LLVMStmInstr $ CondBranch (OI condId) (show l1) (show l2)
          fStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstFalse)
-                                      TypeBoolean
+                                      (TypePtr TypeBoolean)
                                       resTmp
          tStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstTrue)
-                                      TypeBoolean
+                                      (TypePtr TypeBoolean)
                                       resTmp
          brStm' = LLVMStmInstr $ UncondBranch $ show l3
-         resStm = LLVMStmAssgn res $ Load TypeBoolean (OI resTmp)
+         resStm = LLVMStmAssgn res $ Load (TypePtr TypeBoolean) (OI resTmp)
      return ((OI res, t), expStms ++ [resTmpStm,
                                    condStm,
                                    brStm,
@@ -283,15 +283,15 @@ data PostPre = Post | Pre
 
 transIncr :: Exp -> IncrDecr -> PostPre -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transIncr (EId vid) incrDecr postPre =
-  do ((OI ptr, typ), expStms) <- transIdPtr vid
+  do ((OI ptr, TypePtr typ), expStms) <- transIdPtr vid
      val1 <- genLocal
      val2 <- genLocal
-     let s1 = LLVMStmAssgn val1 $ Load typ (OI ptr)
+     let s1 = LLVMStmAssgn val1 $ Load (TypePtr typ) (OI ptr)
          i2 = case incrDecr of
            Incr -> Add typ (OI val1) (OC $ ConstInteger 1)
            Decr -> Sub typ (OI val1) (OC $ ConstInteger 1)
          s2 = LLVMStmAssgn val2 i2
-         s3 = LLVMStmInstr $ Store typ (OI val2) typ ptr
+         s3 = LLVMStmInstr $ Store typ (OI val2) (TypePtr typ) ptr
          res = case postPre of
            Post -> val1
            Pre  -> val2
@@ -343,22 +343,26 @@ emitCmp e1 e2 cond  =
          resTmpStm = LLVMStmAssgn resTmp i1
          condId = Local $ "t" ++ show cc
          condInstr = case t of
+           TypePtr TypeInteger -> ICmp cond t eid1 eid2
+           TypePtr TypeBoolean -> ICmp cond t eid1 eid2
+           TypePtr TypeDouble  -> FCmp (toOrderedCond cond) t eid1 eid2
            TypeInteger -> ICmp cond t eid1 eid2
            TypeBoolean -> ICmp cond t eid1 eid2
            TypeDouble  -> FCmp (toOrderedCond cond) t eid1 eid2
+
          condStm = LLVMStmAssgn condId condInstr
          brStm = LLVMStmInstr $ CondBranch (OI condId) (show l1) (show l2)
 
          tStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstTrue)
-                                      TypeBoolean
+                                      (TypePtr TypeBoolean)
                                       resTmp
          fStm =  LLVMStmInstr $ Store TypeBoolean
                                       (OC ConstFalse)
-                                      TypeBoolean
+                                      (TypePtr TypeBoolean)
                                       resTmp
          brStm' = LLVMStmInstr $ UncondBranch $ show l3
-         resStm = LLVMStmAssgn res $ Load TypeBoolean $ OI resTmp
+         resStm = LLVMStmAssgn res $ Load (TypePtr TypeBoolean) $ OI resTmp
      return ((OI res, TypeBoolean), expStms1 ++ expStms2 ++ [resTmpStm, condStm, brStm, l1Stm, tStm, brStm', l2Stm, fStm, brStm', l3Stm, resStm])
 
 
@@ -415,9 +419,9 @@ transAndOr e1 e2 ao =
          oper      = LLVMStmAssgn tmp $ case ao of
            AOAnd -> And TypeBoolean val1 val2
            AOOr  -> Or TypeBoolean val1 val2
-         storeTmpStm    = LLVMStmInstr $ Store TypeBoolean (OI tmp) TypeBoolean ptr
-         storeInpStm    = LLVMStmInstr $ Store TypeBoolean val1 TypeBoolean ptr
-         loadResStm   = LLVMStmAssgn res $ Load TypeBoolean $ OI ptr
+         storeTmpStm    = LLVMStmInstr $ Store TypeBoolean (OI tmp) (TypePtr TypeBoolean) ptr
+         storeInpStm    = LLVMStmInstr $ Store TypeBoolean val1 (TypePtr TypeBoolean) ptr
+         loadResStm   = LLVMStmAssgn res $ Load (TypePtr TypeBoolean) $ OI ptr
          resStms = case ao of
            AOAnd ->
              expStms1      ++
@@ -471,11 +475,11 @@ transAss vid (ENew t inbrs) =
 
 transAss vid e =
   do
-    (OI ref, typ) <- lookupVar vid
+    (OI ref, TypePtr typ) <- lookupVar vid
     ((val, _), expStms) <- transExp e
     let s = LLVMStmInstr $ Store typ
             val
-            typ
+            (TypePtr typ)
             ref
     return ((val, typ), expStms ++ [s])
 

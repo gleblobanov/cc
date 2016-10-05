@@ -21,16 +21,14 @@ typeCheck s = case pProgram (myLexer s) of
      hPutStrLn stderr "ERROR"
      return $ PDefs []
   Ok tree -> do
-    hPutStrLn stderr "OK"
-    return $ PDefs []
-    {- case typecheck tree of
-    Bad err -> do
-      print err
-      hPutStrLn stderr "ERROR"
-      return $ PDefs []
-    Ok _ -> do
-      hPutStrLn stderr "OK"
-      return tree -}
+    case typecheck tree of
+      Bad err -> do
+        print err
+        hPutStrLn stderr "ERROR"
+        return $ PDefs []
+      Ok _ -> do
+        hPutStrLn stderr "OK"
+        return tree
 
 main :: IO ()
 main = do

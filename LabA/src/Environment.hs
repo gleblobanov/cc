@@ -177,13 +177,31 @@ extendVarDecl :: Id -> Type -> EnvState Env (Operand, LLVMType)
 extendVarDecl vid t = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
                                  vid' = OI $ Local ("var" ++ show cnt)
-                                 t'   = transType t
+                                 t'   = TypePtr $ transType t
                                  str  = scopeStr s
                                  el   = (vid, (vid', t'))
                                  s'   = if null str
                                         then [el] : str
                                         else (el : head str) : tail str
                              in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
+
+
+extendVarDeclArr :: Id -> Type -> [EmptBr] -> EnvState Env (Operand, LLVMType)
+extendVarDeclArr vid t brs = EnvState (\(ls, s, fs, gs, tt) ->
+                             let cnt  = scopeCnt s + 1
+                                 vid' = OI $ Local ("var" ++ show cnt)
+                                 t'   = TypePtr $ makeArrType t brs
+                                 str  = scopeStr s
+                                 el   = (vid, (vid', t'))
+                                 s'   = if null str
+                                        then [el] : str
+                                        else (el : head str) : tail str
+                             in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
+
+makeArrType :: Type -> [EmptBr] -> LLVMType
+makeArrType typ [] = transType typ
+makeArrType typ (_:brs) = TypeArrayInner $ makeArrType typ brs
+
 
 
 
