@@ -169,6 +169,10 @@ transApp fid args = do executedArgsStms <- execArgs args
                        funs <- getFuns
                        out <- genLocal
                        res <- genLocal
+
+                       call <- genLocal
+                       load <- genLocal
+                       alloca <- genLocal
                        let executedArgs = map fst executedArgsStms
                            executedSS   = concatMap snd executedArgsStms
                            -- llvmArgs = LLVMArgs $ map (\(val, typ) -> LLVMArg typ val)
@@ -179,10 +183,12 @@ transApp fid args = do executedArgsStms <- execArgs args
                           let stms' = [LLVMStmInstr $ Call TypeVoid fid' llvmArgs]
                           in return ((OI res, TypeVoid), executedSS ++ stms ++ stms')
                          Just (ftyp@(TypePtr (TypeArray len t)), fid', _) ->
-                          let stms' = let outAssign  = LLVMStmAssgn out $ Call ftyp fid' llvmArgs
-                                          resStore   = LLVMStmAssgn res $ Load ftyp (OI out)
-                                      in [outAssign, resStore]
-                          in return ((OI res, (TypeArray len t)), executedSS ++ stms ++ stms')
+                          let stms' = let callStm = LLVMStmAssgn call $ Call ftyp fid' llvmArgs
+                                          loadStm = LLVMStmAssgn load $ LoadAlign ftyp (OI call) 32
+                                          allocaStm  = LLVMStmAssgn alloca $ AllocateAlign (TypeArray len t) 32
+                                          storeStm  = LLVMStmInstr $ Store (TypeArray len t) (OI load) ftyp alloca
+                                      in [callStm, loadStm, allocaStm, storeStm]
+                          in return ((OI alloca, (TypeArray len t)), executedSS ++ stms ++ stms')
                          Just (ftyp, fid', _) ->
                           let stms' = [LLVMStmAssgn res $ Call ftyp fid' llvmArgs]
                           in return ((OI res, ftyp), executedSS ++ stms ++ stms')

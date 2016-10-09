@@ -158,11 +158,12 @@ data Instruction = Mul  LLVMType Operand Operand   -- Multiply two integers
 
                  | Allocate LLVMType
                  | AllocateAlign LLVMType Integer
-                 | AllocateArr LLVMType Operand
+                 | AllocateArr LLVMType Integer
                  | Bitcast LLVMType Operand LLVMType
                  | GetElementPtr LLVMType Operand [Operand]
                  | Store LLVMType Operand LLVMType Identifier
                  | Load  LLVMType Operand
+                 | LoadAlign  LLVMType Operand Integer
 
                  | ICmp Cond LLVMType Operand Operand
                  | FCmp Cond LLVMType Operand Operand
@@ -211,6 +212,8 @@ instance Show Instruction where
         show tp ++ " " ++ show o2
       Load tp o ->
         "load " ++ show tp ++ " " ++ show o
+      LoadAlign tp o a ->
+        "load " ++ show tp ++ " " ++ show o ++ ", align " ++ show a
       ICmp c t o1 o2 ->
         "icmp " ++ show c ++ " " ++ show t ++ " " ++ show o1 ++ ", " ++ show o2
       FCmp c t o1 o2 ->

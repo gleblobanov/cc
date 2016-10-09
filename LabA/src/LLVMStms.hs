@@ -87,10 +87,12 @@ mkInitStms t (vid:vids) val t' = do stms     <- mkInitStm t vid val t'
 
 mkInitStm :: Type -> Id -> Operand -> LLVMType -> EnvState Env [LLVMStm]
 mkInitStm (TypeArr t brs) vid val _ = do (OI ptr, t') <- extendVarDeclArr vid t brs
-                                         let allInstr = Allocate t'
-                                             sAlloc   = LLVMStmAssgn ptr allInstr
-                                             sStore   = LLVMStmInstr (Store t' val (TypePtr t') ptr)
-                                         return [sAlloc, sStore]
+                                         changeArr (val, t') vid
+                                         -- let allInstr = Allocate t'
+                                             -- sAlloc   = LLVMStmAssgn ptr allInstr
+                                             -- sStore   = LLVMStmInstr (Store t' val (TypePtr t') ptr)
+                                         -- return [sAlloc, sStore]
+                                         return []
 mkInitStm t vid val _ = do (OI ptr, TypePtr t') <- extendVarDecl vid t
                            let allInstr = Allocate t'
                                sAlloc   = LLVMStmAssgn ptr allInstr
