@@ -20,7 +20,7 @@ transFun :: LLVMTree -> JL.Def -> EnvState Env LLVMTree
 transFun tree (JL.DFun t (JL.Id fid) args stms) =
   do cnt <- getCounter
      fns <- getFuns
-     let t' = transType t
+     let t' = transTypeFun t
      putType t'
      case lookup (JL.Id fid) fns of
        Just (_, _, LLVMArgs args') ->
@@ -57,8 +57,11 @@ allocateArg (JL.ADecl typ aid, LLVMArg typ' op) =
      -- let stm1 = LLVMStmAssgn ptr (Allocate typ')
      --     stm2 = LLVMStmInstr $ Store typ' op typ' ptr
      -- extendVar aid (OI ptr) typ'
-     extendVar aid op typ'
-     return []
+     case typ' of
+       -- (TypeArray _ _) -> do extendVar aid op (TypePtr typ')
+                             -- return []
+       _ -> do extendVar aid op typ'
+               return []
      -- return [stm1, stm2]
 
 declPrintRead :: String
@@ -67,5 +70,8 @@ declPrintRead = "declare void @printInt(i32)\n\
                 \declare void @printString(i8*)\n\
                 \declare i32 @readInt()\n\
                 \declare double @readDouble()\n\
-                \declare [0 x i32]* @calloc(i32, i32)\n"
+                \declare i32* @calloc(i32, i32)\n"
 
+
+brsFromTyp :: JL.Type -> [JL.EmptBr]
+brsFromTyp (JL.TypeArr _ embrs) = embrs

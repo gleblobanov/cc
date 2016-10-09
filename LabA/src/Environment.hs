@@ -190,7 +190,7 @@ extendVarDeclArr :: Id -> Type -> [EmptBr] -> EnvState Env (Operand, LLVMType)
 extendVarDeclArr vid t brs = EnvState (\(ls, s, fs, gs, tt) ->
                              let cnt  = scopeCnt s + 1
                                  vid' = OI $ Local ("var" ++ show cnt)
-                                 t'   = TypePtr $ makeArrType t brs
+                                 t'   = makeArrTypeDecl t brs
                                  str  = scopeStr s
                                  el   = (vid, (vid', t'))
                                  s'   = if null str
@@ -198,12 +198,32 @@ extendVarDeclArr vid t brs = EnvState (\(ls, s, fs, gs, tt) ->
                                         else (el : head str) : tail str
                              in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
 
-makeArrType :: Type -> [EmptBr] -> LLVMType
-makeArrType typ [] = transType typ
-makeArrType typ (_:brs) = TypeArrayInner $ makeArrType typ brs
+
+extendVarInitArr :: Id -> Type -> [Operand] -> EnvState Env (Operand, LLVMType)
+extendVarInitArr vid t inbrs = EnvState (\(ls, s, fs, gs, tt) ->
+                             let cnt  = scopeCnt s + 1
+                                 vid' = OI $ Local ("var" ++ show cnt)
+                                 t'   = makeArrTypeInit t inbrs
+                                 str  = scopeStr s
+                                 el   = (vid, (vid', t'))
+                                 s'   = if null str
+                                        then [el] : str
+                                        else (el : head str) : tail str
+                             in (snd el, (ls, Scope s' cnt, fs, gs, tt)))
+
+
+makeArrTypeDecl :: Type -> [EmptBr] -> LLVMType
+makeArrTypeDecl typ [] = transType typ
+makeArrTypeDecl typ (_:brs) =
+  TypeArray (OC $ ConstInteger 0) $ TypeArrayInner $ makeArrTypeDecl typ brs
 
 
 
+
+makeArrTypeInit :: Type -> [Operand] -> LLVMType
+makeArrTypeInit typ [] = transType typ
+makeArrTypeInit typ (inbr:inbrs) =
+  TypeArray inbr $ TypeArrayInner $ makeArrTypeInit typ inbrs
 
 
 extendFun :: Def -> EnvState Env ()
@@ -235,11 +255,17 @@ transType t = case t of
   Type_double     -> TypeDouble
   Type_void       -> TypeVoid
   Type_string     -> TypeString
-  TypeArr t' _    -> TypeArray (OC $ ConstInteger 0)  $ transType t'
+  TypeArr t' ebr  ->  makeArrTypeDecl t' ebr
 
 
--- transTypeFun :: Type -> LLVMType
--- transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
--- transTypeFun t = transType t
+transTypeFun :: Type -> LLVMType
+transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
+transTypeFun t = transType t
 
-transTypeFun = transType
+
+getElemType :: LLVMType -> Integer -> LLVMType
+getElemType arrType level
+  | level == 1 = innerElemType
+  | otherwise  = getElemType innerElemType (level - 1)
+      where innerElemType = getInnerElemType arrType
+            getInnerElemType (TypeArray _ (TypeArrayInner t)) = t
