@@ -1,13 +1,14 @@
 module LLVMStms where
 
+import Control.Monad (liftM)
+
 import AbsJL
 import LLVMSyntax
-import LLVMTypes
 import LLVMExps
 import Environment
 
-import Control.Monad (liftM)
 
+-- | Translates JL statements to LLVM statements
 transStms :: [Stm] -> EnvState Env [LLVMStm]
 transStms []     = return []
 transStms (s:ss) =
@@ -23,25 +24,27 @@ transStms (s:ss) =
 
 
 
+-- | Translates expression statements
 transSExp :: Exp -> [Stm] -> EnvState Env [LLVMStm]
 transSExp e ss = do (_, expStms) <- transExp e
                     restStms <- transStms ss
                     return $ expStms ++ restStms
 
 
-
+-- | Translates declarations
 transSDecls :: Type -> [Id] -> [Stm] -> EnvState Env [LLVMStm]
 transSDecls t ids ss = do declStms <- transDecl t ids
                           restStms <- transStms ss
                           return $ declStms ++ restStms
 
+-- | Walks through a list of declaration and generates LLVM statements
 transDecl :: Type -> [Id] -> EnvState Env [LLVMStm]
 transDecl _ []  = return []
 transDecl t (vid:vids) = do stms  <- mkDeclStm t vid
                             stms' <- transDecl t vids
                             return $ stms ++ stms'
 
-
+-- | Helper for transDecl. Also it initializes variables to the standard values
 mkDeclStm :: Type -> Id -> EnvState Env [LLVMStm]
 mkDeclStm t@(TypeArr _ brs) vid = extendVarDeclArr vid t brs >>
                                    return []
@@ -56,6 +59,7 @@ mkDeclStm t vid = do (OI ptr, TypePtr t') <- extendVarDecl vid t
                      return [allstm, sStore]
 
 
+-- | Translates initialization statement both for arrays and other types
 transSInit :: Type -> [Id] -> Exp -> [Stm] -> EnvState Env [LLVMStm]
 transSInit (TypeArr typ _) [vid] (ENew _ inbrs) stms =
   do (inbrs', inbrsStms) <- transInbrs inbrs
@@ -70,7 +74,7 @@ transSInit t ids e ss = do ((ptr, t'), expStms) <- transExp e
                            return $ expStms ++ initStms ++ restStms
 
 
-
+-- | Helper for transSInit
 mkInitStms :: Type -> [Id] -> Operand -> LLVMType -> EnvState Env [LLVMStm]
 mkInitStms _ [] _ _ = return []
 mkInitStms t (vid:vids) val t' = do stms     <- mkInitStm t vid val t'
@@ -96,7 +100,7 @@ mkInitStm t vid val _ = do (OI ptr, TypePtr t') <- extendVarDecl vid t
 
 
 
-
+-- | Translates return statements
 transSReturn :: ReturnRest ->  EnvState Env [LLVMStm]
 transSReturn rest = case rest of
   ReturnRest e -> do ((val, t'), expStms) <- transExp e
@@ -113,7 +117,7 @@ transSReturn rest = case rest of
 
 
 
-
+-- | Translates while statements
 transSWhile :: Exp -> Stm -> [Stm] -> EnvState Env [LLVMStm]
 transSWhile e stm ss = do whileStms <- transWhile e stm
                           restStms <- transStms ss
@@ -135,7 +139,7 @@ transWhile e stm = do ((val, t), expStms) <- transExp e
                           condStm   = LLVMStmInstr (CondBranch val (show l2) (show l3))
                           uncondStm  = LLVMStmInstr (UncondBranch (show l1))
                           res =
-                                [uncondStm] ++ -- TODO Remove it and look what happens
+                                [uncondStm] ++
                                 [sl1]       ++
                                  expStms    ++
                                 [condStm]   ++
@@ -147,7 +151,7 @@ transWhile e stm = do ((val, t), expStms) <- transExp e
 
 
 
-
+-- | Translates blocks of statements
 transSBlock :: [Stm] -> [Stm] -> EnvState Env [LLVMStm]
 transSBlock stms ss = do blockStms <- transBlock stms
                          restStms  <- transStms ss
@@ -160,7 +164,7 @@ transBlock stms = do newBlock
                      return stms'
 
 
--- TODO In brackets could be expression
+-- | Translates Foreach loop
 transSForeach :: Type -> Id -> Id -> Stm -> [Stm] -> EnvState Env [LLVMStm]
 transSForeach t ind arr stm stms = do foreachStms <- transForeach t ind arr stm
                                       restStms  <- transStms stms
@@ -242,12 +246,13 @@ transForeach t ind' arr stm = do
 
 
 
+-- | Translates if construction
 transSIf :: Exp -> IfRest -> [Stm] -> EnvState Env [LLVMStm]
 transSIf e r ss = do ifStms <- transIf e r
                      restStms  <- transStms ss
                      return $ ifStms ++ restStms
 
--- TODO Merge two branches effectively
+
 transIf :: Exp -> IfRest -> EnvState Env [LLVMStm]
 transIf e r = case r of
   IfR stm rr -> case rr of

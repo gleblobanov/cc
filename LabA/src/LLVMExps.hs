@@ -1,11 +1,12 @@
 module LLVMExps where
 
+import Data.List (intersperse)
+
 import AbsJL
 import LLVMSyntax
 import Environment
-import LLVMTypes
-import Data.List (intersperse)
 
+-- | Translates expressions
 transExp :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transExp exp =   case exp of
  ETrue        -> transTrue
@@ -37,14 +38,12 @@ transExp exp =   case exp of
  EOr e1 e2     -> transOr e1 e2
  EAss (EId vid) e -> transAss vid e
  EAss arr@(EIdArr vid inbrs) e -> transAssArr arr e
- -- ENew t inbrs    -> transNew t inbrs
  ELength arr    -> transLen arr
 
 
 
 
---
-
+-- | Translates constants
 transConst :: Constant -> LLVMType -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transConst c t = return ((OC c, t), [])
 
@@ -60,11 +59,10 @@ transInteger i = transConst (ConstInteger i) TypeInteger
 transDouble :: Double -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transDouble d = transConst (ConstDouble d) TypeDouble
 
---
 
 
 
-
+-- | Translates strings
 transString :: String -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transString s = do cnt <- getCounter
                    env <- get
@@ -80,36 +78,24 @@ transString s = do cnt <- getCounter
                      Nothing -> fail $ "LLVM global variable for a string isn't found (" ++ s ++ ")."
 
 
-{-
-   %t1 = getelementptr [13 x i8]* @hw, i32 0, i32 0
-   call void @printString(i8* %t1)
-   ret i32 0
--}
-
-
+-- | Translates Id expression for the case when it refers to a pointer
 transIdPtr :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transIdPtr vid = do (ptr, typ) <- lookupVar vid
                     return ((ptr, typ), [])
 
 
+-- | Translates Id expression for all other cases
 transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transId vid = do (ptr, typ) <- lookupVar vid
                  case typ of
-                   -- TypeArray _ _ -> do val <- genLocal
-                   --                     let s = LLVMStmAssgn val $ Load (TypePtr typ) ptr
-                   --                     return ((OI val, typ), [s])
-
                    TypePtr t -> do val <- genLocal
                                    let s = LLVMStmAssgn val $ Load (TypePtr t) ptr
                                    return ((OI val, t), [s])
                    _        -> return ((ptr, typ), [])
--- transExpPtr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
--- transExpPtr (EId vid) = do (OI ptr, typ) <- lookupVar vid
---                            return ((ptr, typ), [])
 
 
 
-
+-- | Translates access to elements of an array
 transIdArr :: Id -> [InBr] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transIdArr vid inbrs =  do
     (arrOp, arrType)   <- lookupVar vid
@@ -132,7 +118,7 @@ transIdArr vid inbrs =  do
     return ((loadRes, arrElemType), inbrStms ++ [xPtrGet, xLoad])
 
 
-
+-- | Translates application of third-party functions
 transApp :: Id -> [Exp] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transApp (Id "printString") [EString s] =
   do ((val, t), stms) <- transString s
@@ -166,7 +152,7 @@ transApp (Id "readDouble") _ =
      return ((OI val, TypeDouble), [call])
 
 
-
+-- | Translates application of user-defined functions
 transApp fid args = do executedArgsStms <- execArgs args
                        funs <- getFuns
                        out <- genLocal
@@ -177,8 +163,6 @@ transApp fid args = do executedArgsStms <- execArgs args
                        alloca <- genLocal
                        let executedArgs = map fst executedArgsStms
                            executedSS   = concatMap snd executedArgsStms
-                           -- llvmArgs = LLVMArgs $ map (\(val, typ) -> LLVMArg typ val)
-                                                     -- executedArgs
                        (llvmArgs, stms) <- processArgs executedArgs
                        case lookup fid funs of
                          Just (TypeVoid, fid', _) ->
@@ -187,7 +171,6 @@ transApp fid args = do executedArgsStms <- execArgs args
                          Just (ftyp@(TypeArray len t), fid', _) ->
                           let stms' = let callStm = LLVMStmAssgn call $ Call ftyp fid' llvmArgs
                                           allocaStm  = LLVMStmAssgn alloca $ AllocateAlign ftyp 32
-                                          -- loadStm = LLVMStmAssgn load $ LoadAlign ftyp (OI call) 32
                                           storeStm  = LLVMStmInstr $ Store ftyp (OI call) (TypePtr ftyp) alloca
                                       in [callStm, allocaStm, storeStm]
                           in return ((OI alloca, (TypeArray len t)), executedSS ++ stms ++ stms')
@@ -196,25 +179,20 @@ transApp fid args = do executedArgsStms <- execArgs args
                           in return ((OI res, ftyp), executedSS ++ stms ++ stms')
                          Nothing -> fail $ "Function isn't found. " ++ show fid
 
+-- | Translates arguments
 execArgs :: [Exp] -> EnvState Env [((Operand, LLVMType), [LLVMStm])]
 execArgs = mapM transExp
 
+-- | Creates LLVM arguments
 processArgs :: [(Operand, LLVMType)] -> EnvState Env (LLVMArgs, [LLVMStm])
 processArgs []   = return (LLVMArgs [], [])
 processArgs (ot: ots) =
   let o = fst ot
       t = snd ot
-  in case t of
-     -- TypeArray _ _ -> do tmp <- genLocal
-     --                     let tmpLoad = LLVMStmAssgn tmp $ Load t o
-     --                         larg = LLVMArg t (OI tmp)
-     --                     (LLVMArgs largs, stms) <- processArgs ots
-     --                     return (LLVMArgs (larg:largs), tmpLoad:stms)
+  in do (LLVMArgs largs, stms) <- processArgs ots
+        return (LLVMArgs (LLVMArg t o : largs), stms)
 
-     _              -> do (LLVMArgs largs, stms) <- processArgs ots
-                          return (LLVMArgs (LLVMArg t o : largs), stms)
-
-
+-- | Simplifies generation of LLVM instruction
 emitOperation :: Instruction -> EnvState Env (Operand, [LLVMStm])
 emitOperation instr =
   do
@@ -224,7 +202,7 @@ emitOperation instr =
     return (OI res, [stm])
 
 
-
+-- | Translates negation
 transNeg :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNeg e =
   do ((lid, t), expStms) <- transExp e
@@ -240,7 +218,7 @@ transNeg e =
        _           -> fail "transNeg: wrong type"
 
 
-
+-- | Translates Boolean Not
 transNot :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNot e =
   do l1c <- getCounter
@@ -293,7 +271,7 @@ data IncrDecr = Incr | Decr
 data PostPre = Post | Pre
 
 
-
+-- | Translates a family of increment an decrement functions
 transIncr :: Exp -> IncrDecr -> PostPre -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transIncr (EId vid) incrDecr postPre =
   do ((OI ptr, TypePtr typ), expStms) <- transIdPtr vid
@@ -314,6 +292,7 @@ transIncr (EId vid) incrDecr postPre =
 
 data Ar = ArTimes | ArDiv | ArMod | ArPlus | ArMinus
 
+-- | Translates a family of arithmetics operations
 transAr :: Exp -> Exp -> Ar -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAr e1 e2 ar =
   do ((val1, typ), ss1) <- transExp e1
@@ -334,7 +313,7 @@ transAr e1 e2 ar =
      return ((res, typ), ss1 ++ ss2 ++ ss)
 
 
-
+-- | Produces a set of LLVM statements facilitating different comparison operations
 emitCmp :: Exp -> Exp -> Cond -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 emitCmp e1 e2 cond  =
   do l1c <- getCounter
@@ -380,36 +359,34 @@ emitCmp e1 e2 cond  =
 
 
 
-
-
--- Check if signed comparison goes
-
+-- | Translates less-than check
 transLt :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transLt e1 e2 = emitCmp e1 e2 Slt
 
-
+-- | Translates greater-than check
 transGt :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transGt e1 e2 = emitCmp e1 e2 Sgt
 
-
+-- | Translates less-than-or-equal check
 transLtEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transLtEq e1 e2 = emitCmp e1 e2 Sle
 
-
+-- | Translates greater-than-or-equal check
 transGtEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transGtEq e1 e2 = emitCmp e1 e2 Sge
 
-
+-- | Translates equality check
 transEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transEq e1 e2 = emitCmp e1 e2 Eq
 
-
+-- | Translates not-equal check
 transNEq :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transNEq e1 e2 = emitCmp e1 e2 Ne
 
 
 data AO = AOOr | AOAnd
 
+-- | Translates and-operation and or-operation
 transAndOr :: Exp -> Exp -> AO -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAndOr e1 e2 ao =
   do ((val1, t), expStms1) <- transExp e1
@@ -480,6 +457,7 @@ transAnd e1 e2 = transAndOr e1 e2 AOAnd
 type IfArr = Bool
 
 
+-- | Translates assignment of a newly generated array to an array variable
 transAss vid e@(ENew typ inbrs) = do
      (inbrs', inbrsStms) <- transInbrs inbrs
      (OI ptr, t) <- extendVarInitArr vid typ inbrs'
@@ -489,7 +467,7 @@ transAss vid e@(ENew typ inbrs) = do
 
 
 
-
+-- | Translates assignment of any value to the other variable type
 transAss vid e =
   do
     (OI ref, TypePtr typ) <- lookupVar vid
@@ -502,7 +480,7 @@ transAss vid e =
 
 
 
-
+-- | Translates assignment of any value to an element of an array
 transAssArr :: Exp -> Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transAssArr e1@(EIdArr vid inbrs) e2 =
   do
@@ -529,9 +507,7 @@ transAssArr e1@(EIdArr vid inbrs) e2 =
 
 
 
--- transNew :: Type -> [InBr] -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-
-
+-- | Translates the length method
 transLen :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transLen e = do ((arrStrPtr, arrStrType), stms') <- transExp e
                 lenPtr <- genLocal
@@ -543,7 +519,7 @@ transLen e = do ((arrStrPtr, arrStrType), stms') <- transExp e
                 return ((OI arrLen, TypeInteger), stms' ++ [lenPtrGet, arrLenLoad])
 
 
-
+-- | Translates a list of array indexes to a list of pointers
 inbrToPtrs :: [InBr] -> EnvState Env ([Operand], [LLVMStm])
 inbrToPtrs [] = return ([], [])
 inbrToPtrs (InBr e:inbrs) = do
@@ -554,7 +530,7 @@ inbrToPtrs (InBr e:inbrs) = do
 
 
 
-
+-- | Creates both one-dimensional and multi-dimensional arrays
 makeArr :: Identifier -> LLVMType -> EnvState Env [LLVMStm]
 makeArr arrPtr arrType@(TypeArray len innerArrType) =
   do
@@ -602,16 +578,13 @@ makeArr arrPtr arrType@(TypeArray len innerArrType) =
                    sInnerArrStore]
      case innerArrType of
        TypeArrayInner TypeInteger -> return result
-       -- TypeArrayInner t ->
-         -- do stms <- liftM concat $ mapM (makeInnerArr (OI arrPtr) arrType t) $ take (fromInteger len) [0..]
-            -- return $ result ++ stms
        TypeArrayInner t ->
          do stms <- makeInnerArrForeach (OI arrPtr) arrType t len
             return $ result ++ stms
 makeArr _ _ = return  []
 
 
-
+-- | Creates multiple inner arrays using foreach loop
 makeInnerArrForeach :: Operand -> LLVMType -> LLVMType -> Operand -> EnvState Env [LLVMStm]
 makeInnerArrForeach outerArrPtrOp arrType innerType len = do
   indPtr <- genLocal
@@ -672,20 +645,14 @@ makeInnerArrForeach outerArrPtrOp arrType innerType len = do
 
 
 
-
-
-
-
+-- | Simplifies calloc-call generation
 callocInstr :: Integer -> Instruction
 callocInstr x = Call (TypeArrayMult 1) (Global "calloc")
   (LLVMArgs [LLVMArg TypeInteger (OC $ ConstInteger x), LLVMArg TypeInteger (OC $ ConstInteger 1)])
 
 
 
-
-
-
-
+-- | Translates expression from index brackets of an array
 transInbrs :: [InBr] -> EnvState Env ([Operand], [LLVMStm])
 transInbrs [] = return ([], [])
 transInbrs ((InBr e):inbrs) = do ((ind, _), stms) <- transExp e

@@ -1,11 +1,12 @@
 module Functions where
 
+
+import Control.Monad
+
 import qualified AbsJL as JL
 import LLVMSyntax
 import Environment
 import LLVMStms
-import Control.Monad
-import LLVMTypes
 
 putStmsToFun :: LLVMFunction -> [LLVMStm] -> LLVMFunction
 putStmsToFun (LLVMFunction t fid args _) = LLVMFunction t fid args
@@ -45,24 +46,12 @@ transFun tree (JL.DFun t (JL.Id fid) args stms) =
        Nothing -> fail $ "Function isn't found " ++ show fid
 
 
--- extendArgs :: [(Arg, LLVMArg)] -> EnvState Env [LLVMStm]
--- extendArgs = do
---   cn
---   in foldr ((>>). (\(ADecl _ aid, LLVMArg t val) ->
---                             extendVar aid val t)) (return ())
 
 allocateArg :: (JL.Arg, LLVMArg) -> EnvState Env [LLVMStm]
 allocateArg (JL.ADecl typ aid, LLVMArg typ' op) =
   do ptr <- genLocal
-     -- let stm1 = LLVMStmAssgn ptr (Allocate typ')
-     --     stm2 = LLVMStmInstr $ Store typ' op typ' ptr
-     -- extendVar aid (OI ptr) typ'
-     case typ' of
-       -- (TypeArray _ _) -> do extendVar aid op (TypePtr typ')
-                             -- return []
-       _ -> do extendVar aid op typ'
-               return []
-     -- return [stm1, stm2]
+     extendVar aid op typ'
+     return []
 
 declPrintRead :: String
 declPrintRead = "declare void @printInt(i32)\n\

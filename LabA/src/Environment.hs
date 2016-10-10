@@ -2,9 +2,7 @@ module Environment where
 
 import qualified Data.Map as Map
 import Data.List
---import LLVMTree
 
-import LLVMTypes
 import LLVMSyntax
 import AbsJL
 
@@ -37,10 +35,7 @@ emptyEnv = ([], Scope [[]] 0, emptyFuns, [], TypeVoid)
 getGlobalStrings :: Env -> GlobalStrings
 getGlobalStrings (_, _, _, gs, _) = gs
 
--- getFuns :: Env -> Funs
--- getFuns (_, _, funs, _, _) = funs
 
--- TODO replace everywhere
 genLocal :: EnvState Env Identifier
 genLocal = do cnt <- getCounter
               return $ Local $ "t" ++ show cnt
@@ -244,7 +239,6 @@ transArg cnt (ADecl t (Id aid )) = LLVMArg (transType t) (OI $ Local (aid ++ sho
 
 
 
--- TODO possible bug
 transType :: Type -> LLVMType
 transType t = case t of
   Type_true       -> TypeBoolean
@@ -259,7 +253,6 @@ transType t = case t of
 
 
 transTypeFun :: Type -> LLVMType
--- transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
 transTypeFun t@(TypeArr _ _) = transType t
 transTypeFun t = transType t
 
