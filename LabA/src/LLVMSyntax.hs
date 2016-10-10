@@ -30,6 +30,8 @@ data LLVMType = TypeInteger
               | None
 
 
+constLength = 50
+
 instance Show LLVMType where
   show instr = case instr of
     TypeInteger -> "i32"
@@ -42,7 +44,7 @@ instance Show LLVMType where
     TypeFunction t ts -> ""
     TypeStructure ts  -> ""
     TypeArray len t  -> "{i32, " ++ show t ++ "}"
-    TypeArrayInner t -> "[" ++ (show 0) ++ " x " ++ show t ++ "]"
+    TypeArrayInner t -> "[" ++ (show constLength) ++ " x " ++ show t ++ "]"
     TypeArrayMult dem -> makeMultArr dem
     TypeArrayInnerLen len t -> "[" ++ (show len) ++ " x " ++ show t ++ "]"
     TypePtr t -> show t ++ "*"
@@ -57,8 +59,8 @@ typeFromPtr (TypePtr t) = t
 typeFromPtr t = t
 
 makeMultArr :: Integer -> String
-makeMultArr dem | dem == 1  = "[0 x i32]"
-                | otherwise = "[0 x ]" ++ (makeMultArr $ dem - 1) ++ "]"
+makeMultArr dem | dem == 1  = "[" ++ show constLength ++ " x i32]"
+                | otherwise = "[" ++ show constLength ++ " x ]" ++ (makeMultArr $ dem - 1) ++ "]"
 
 
 
@@ -273,6 +275,7 @@ instance Show LLVMFunction where
 data LLVMStm = LLVMStmInstr Instruction
              | LLVMStmAssgn Identifier Instruction
              | LLVMStmLabel LLVMLabel
+             | LLVMStmEmpty
 instance Show LLVMStm where
   show (LLVMStmInstr i) =
     shift ++
@@ -286,6 +289,7 @@ instance Show LLVMStm where
     "\n"
   show (LLVMStmLabel l) =
     show l ++ ":\n"
+  show (LLVMStmEmpty) = ""
 
 shift :: String
 shift = "       "

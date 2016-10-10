@@ -259,8 +259,8 @@ transType t = case t of
 
 
 transTypeFun :: Type -> LLVMType
-transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
--- transTypeFun t@(TypeArr _ _) = transType t
+-- transTypeFun t@(TypeArr _ _) = TypePtr $ transType t
+transTypeFun t@(TypeArr _ _) = transType t
 transTypeFun t = transType t
 
 

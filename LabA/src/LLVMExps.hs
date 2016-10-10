@@ -95,17 +95,14 @@ transIdPtr vid = do (ptr, typ) <- lookupVar vid
 transId :: Id -> EnvState Env ((Operand, LLVMType), [LLVMStm])
 transId vid = do (ptr, typ) <- lookupVar vid
                  case typ of
+                   -- TypeArray _ _ -> do val <- genLocal
+                   --                     let s = LLVMStmAssgn val $ Load (TypePtr typ) ptr
+                   --                     return ((OI val, typ), [s])
+
                    TypePtr t -> do val <- genLocal
-                                   let s = LLVMStmAssgn val $ Load typ ptr
+                                   let s = LLVMStmAssgn val $ Load (TypePtr t) ptr
                                    return ((OI val, t), [s])
                    _        -> return ((ptr, typ), [])
-
-                   -- _ -> do val <- genLocal
-                   --         let s = LLVMStmAssgn val $ Load typ ptr
-                   --         return ((OI val, typ), [s])
-
-
-
 -- transExpPtr :: Exp -> EnvState Env ((Identifier, LLVMType), [LLVMStm])
 -- transExpPtr (EId vid) = do (OI ptr, typ) <- lookupVar vid
 --                            return ((ptr, typ), [])
@@ -126,8 +123,13 @@ transIdArr vid inbrs =  do
         xPtrGet = LLVMStmAssgn xPtr $ GetElementPtr
           (TypePtr arrType) arrOp ots'
         arrElemType = getElemType arrType $ toInteger $ length inbrs
-        xLoad = LLVMStmAssgn load $ Load (TypePtr arrElemType) (OI xPtr)
-    return ((OI load, arrElemType), inbrStms ++ [xPtrGet, xLoad])
+        xLoad = case arrElemType of
+          TypeArray _ _ ->  LLVMStmEmpty
+          _             ->  LLVMStmAssgn load $ Load (TypePtr arrElemType) (OI xPtr)
+        loadRes = case arrElemType of
+          TypeArray _ _ -> OI xPtr
+          _             -> OI load
+    return ((loadRes, arrElemType), inbrStms ++ [xPtrGet, xLoad])
 
 
 
@@ -182,12 +184,12 @@ transApp fid args = do executedArgsStms <- execArgs args
                          Just (TypeVoid, fid', _) ->
                           let stms' = [LLVMStmInstr $ Call TypeVoid fid' llvmArgs]
                           in return ((OI res, TypeVoid), executedSS ++ stms ++ stms')
-                         Just (ftyp@(TypePtr (TypeArray len t)), fid', _) ->
+                         Just (ftyp@(TypeArray len t), fid', _) ->
                           let stms' = let callStm = LLVMStmAssgn call $ Call ftyp fid' llvmArgs
-                                          loadStm = LLVMStmAssgn load $ LoadAlign ftyp (OI call) 32
-                                          allocaStm  = LLVMStmAssgn alloca $ AllocateAlign (TypeArray len t) 32
-                                          storeStm  = LLVMStmInstr $ Store (TypeArray len t) (OI load) ftyp alloca
-                                      in [callStm, loadStm, allocaStm, storeStm]
+                                          allocaStm  = LLVMStmAssgn alloca $ AllocateAlign ftyp 32
+                                          -- loadStm = LLVMStmAssgn load $ LoadAlign ftyp (OI call) 32
+                                          storeStm  = LLVMStmInstr $ Store ftyp (OI call) (TypePtr ftyp) alloca
+                                      in [callStm, allocaStm, storeStm]
                           in return ((OI alloca, (TypeArray len t)), executedSS ++ stms ++ stms')
                          Just (ftyp, fid', _) ->
                           let stms' = [LLVMStmAssgn res $ Call ftyp fid' llvmArgs]
@@ -487,12 +489,13 @@ type IfArr = Bool
 transAss vid e =
   do
     (OI ref, TypePtr typ) <- lookupVar vid
-    ((val, _), expStms) <- transExp e
+    ((val, t), expStms) <- transExp e
     let s = LLVMStmInstr $ Store typ
-            val
-            (TypePtr typ)
-            ref
+          val
+          (TypePtr typ)
+          ref
     return ((val, typ), expStms ++ [s])
+
 
 
 
@@ -501,17 +504,24 @@ transAssArr e1@(EIdArr vid inbrs) e2 =
   do
     (arrOp, arrType)   <- lookupVar vid
     (ots, inbrStms)    <- inbrToPtrs inbrs
-    ((val, _), e2Stms) <- transExp e2
+    ((val, t), e2Stms) <- transExp e2
 
     xPtr <- genLocal
+    ref  <- genLocal
     let ots' = [OT TypeInteger $ OC $ ConstInteger 0,
                 OT TypeInteger $ OC $ ConstInteger 1] ++
                (intersperse (OT TypeInteger $ OC $ ConstInteger 1) ots)
         xPtrGet = LLVMStmAssgn xPtr $ GetElementPtr
           (TypePtr arrType) arrOp ots'
         arrElemType = getElemType arrType $ toInteger $ length inbrs
-        xStore = LLVMStmInstr $ Store arrElemType val (TypePtr arrElemType) xPtr
-    return ((val, arrElemType), inbrStms ++ e2Stms ++ [xPtrGet, xStore])
+        valStm = case t of
+          TypeArray _ _ -> LLVMStmAssgn ref $ Load (TypePtr t) val
+          _             -> LLVMStmEmpty
+        retVal = case t of
+          TypeArray _ _ -> (OI ref)
+          _ -> val
+        xStore = LLVMStmInstr $ Store arrElemType retVal (TypePtr arrElemType) xPtr
+    return ((retVal, arrElemType), inbrStms ++ e2Stms ++ [valStm, xPtrGet, xStore])
 
 
 
@@ -614,14 +624,14 @@ transAssArr e1@(EIdArr vid inbrs) e2 =
 
 
 transLen :: Exp -> EnvState Env ((Operand, LLVMType), [LLVMStm])
-transLen (EId arr) = do (arrStrPtr, arrStrType) <- lookupVar arr
-                        lenPtr <- genLocal
-                        arrLen <- genLocal
-                        let lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
-                              (TypePtr arrStrType) arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
-                                                     OT TypeInteger $ OC $ ConstInteger 0]
-                            arrLenLoad = LLVMStmAssgn arrLen $ Load (TypePtr TypeInteger) $ OI lenPtr
-                        return ((OI arrLen, TypeInteger), [lenPtrGet, arrLenLoad])
+transLen e = do ((arrStrPtr, arrStrType), stms') <- transExp e
+                lenPtr <- genLocal
+                arrLen <- genLocal
+                let lenPtrGet = LLVMStmAssgn lenPtr $ GetElementPtr
+                      (TypePtr arrStrType) arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
+                                                      OT TypeInteger $ OC $ ConstInteger 0]
+                    arrLenLoad = LLVMStmAssgn arrLen $ Load (TypePtr TypeInteger) $ OI lenPtr
+                return ((OI arrLen, TypeInteger), stms' ++ [lenPtrGet, arrLenLoad])
 
 
 

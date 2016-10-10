@@ -224,8 +224,9 @@ typecheckStms env typ (stm:stms) cR = case stm of
                         then fail $ show id2 ++ "Not an array."
                         else do env' <- updateVar (newBlock env) id1 typ'
                                 let id2t' = typeFromArr id2t
-                                if id2t' /= typ'
-                                 then fail "Wrong type in foreach."
+                                    typ'' = typeFromArr typ'
+                                if id2t' /= typ''
+                                 then fail $ "Wrong type in foreach." ++ show id2t' ++ ";" ++ show typ''
                                  else do r1 <- typecheckStms env' typ [stms'] cR
                                          r2 <- typecheckStms (exitBlock env') typ stms cR
                                          return $ r1 || r2
@@ -328,9 +329,9 @@ inferExp env x = case x of
 
          EId id      -> lookupVar env id
          -- EId id      -> do t <- lookupVar env id
-         --                   case t of
-         --                     TypeArr t' _ -> return t'
-         --                     _            -> return t
+                           -- case t of
+                             -- TypeArr t' _ -> return t'
+                             -- _            -> return t
          EIdArr id _ -> do TypeArr t _ <- lookupVar env id
                            return t
          EApp id exps -> inferApp env id exps
@@ -369,15 +370,22 @@ inferExp env x = case x of
          EAss a b -> do
               typa <- inferExp env a
               typb <- inferExp env b
-              if (typa == typb) then
+              if ((typeFromArr typa) == (typeFromArr typb)) then
                  return typa
               else
-                 fail $ "3 type of " ++ printTree a
+                 fail $ "3 type of " ++ printTree a ++ show typa ++ "|" ++ printTree b ++ show typb
          ENew    t i -> return t
-         ELength e -> do typ <- inferExp env e
-                         case typ of
-                             TypeArr _ _-> return Type_int
-                             _       -> fail "Wrong argument of length"
+
+         ELength e ->  case e of
+                         EIdArr aid inbrs -> do (TypeArr _ inbrs') <- lookupVar env aid
+                                                if length inbrs < length inbrs'
+                                                    then return Type_int
+                                                    else fail $ "1 Wrong argument of length"
+                         e -> do typ <- inferExp env e
+                                 case typ of
+                                    (TypeArr _ _) -> return Type_int
+                                    _ -> fail $  "2 Wrong argument of length"
+                         _ -> fail $  "2 Wrong argument of length"
          _ -> fail $ "Unknown expression" ++ show x
 
 
@@ -401,9 +409,9 @@ inferBoolBin env a b = do
          then if isBool typa
               then return Type_boolean
               else fail $ "6 type of expression " ++ printTree a
-         else if (typa == typb) 
+         else if (typa == typb)
               then return Type_boolean
-              else fail $ "7 type of expression " ++ show typa ++ " " ++ show typb ++ printTree a
+              else fail $ "7 type of expression " ++ show typa ++ " " ++ show typb ++ printTree a ++ printTree b
 
 
 

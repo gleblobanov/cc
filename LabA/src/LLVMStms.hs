@@ -61,7 +61,7 @@ transSInit :: Type -> [Id] -> Exp -> [Stm] -> EnvState Env [LLVMStm]
 transSInit (TypeArr typ _) [vid] (ENew _ inbrs) stms =
   do (inbrs', inbrsStms) <- transInbrs inbrs
      (OI ptr, t) <- extendVarInitArr vid typ inbrs'
-     let sArrPtr = LLVMStmAssgn ptr $ AllocateAlign t 32
+     let sArrPtr = LLVMStmAssgn ptr $ AllocateAlign t 1024
      arrStms <- makeArr ptr t
      restStms <- transStms stms
      return $ inbrsStms ++ [sArrPtr] ++ arrStms ++ restStms
@@ -157,10 +157,12 @@ makeArr arrPtr arrType@(TypeArray len innerArrType) =
        TypeArrayInner t ->
          do stms <- makeInnerArrForeach (OI arrPtr) arrType t len
             return $ result ++ stms
+makeArr _ _ = return  []
+
 
 
 makeInnerArrForeach :: Operand -> LLVMType -> LLVMType -> Operand -> EnvState Env [LLVMStm]
-makeInnerArrForeach outerArrPtrOp arrType innerType len@(OI lenIdent) = do
+makeInnerArrForeach outerArrPtrOp arrType innerType len = do
   indPtr <- genLocal
   let indPtrAlloc = LLVMStmAssgn indPtr $ Allocate TypeInteger
       indPtrStore = LLVMStmInstr $
@@ -182,7 +184,7 @@ makeInnerArrForeach outerArrPtrOp arrType innerType len@(OI lenIdent) = do
       br = LLVMStmInstr $ CondBranch (OI check) (show l2) (show l3)
 
   arrPtr <- genLocal
-  let sArrPtr = LLVMStmAssgn arrPtr $ AllocateAlign innerType 32
+  let sArrPtr = LLVMStmAssgn arrPtr $ AllocateAlign innerType 1024
   innerArrStms <- makeArr arrPtr innerType
   x1 <- genLocal
   x2 <- genLocal
@@ -226,7 +228,7 @@ makeInnerArrForeach outerArrPtrOp arrType innerType len@(OI lenIdent) = do
 -- makeInnerArr :: Operand -> LLVMType -> LLVMType -> Integer -> EnvState Env [LLVMStm]
 -- makeInnerArr outerArrPtrOp arrType innerType index = do
 --   arrPtr <- genLocal
---   let sArrPtr = LLVMStmAssgn arrPtr $ AllocateAlign innerType 32
+--   let sArrPtr = LLVMStmAssgn arrPtr $ AllocateAlign innerType 1024
 --   innerArrStms <- makeArr arrPtr innerType
 --   x1 <- genLocal
 --   x2 <- genLocal
@@ -260,10 +262,10 @@ transSReturn rest = case rest of
   ReturnRest e -> do ((val, t'), expStms) <- transExp e
                      t <- getType
                      case t' of
-                       -- (TypeArray _ _) -> do res <- genLocal
-                                             -- let resLoad = LLVMStmAssgn res $ Load (TypePtr t') val
-                                                 -- retStm  = LLVMStmInstr (Return t $ OI res)
-                                             -- return $ expStms ++ [resLoad, retStm]
+                       (TypeArray _ _) -> do res <- genLocal
+                                             let resLoad = LLVMStmAssgn res $ Load (TypePtr t') val
+                                                 retStm  = LLVMStmInstr (Return t $ OI res)
+                                             return $ expStms ++ [resLoad, retStm]
                        _ -> let retStm = LLVMStmInstr (Return t val)
                             in return $ expStms ++ [retStm]
   ReturnRestEmpt -> return [LLVMStmInstr ReturnVoid]
@@ -357,7 +359,10 @@ transForeach t ind' arr stm = do
   xPtr  <- genLocal
   x     <- genLocal
   let arrElemType = getElemType arrStrType 1
-  extendVar ind' (OI x) arrElemType
+  case arrElemType of
+        TypeArray _ _ -> extendVar ind' (OI xPtr) arrElemType
+        _             -> extendVar ind' (OI x) arrElemType
+
   let indLoad = LLVMStmAssgn ind $ Load (TypePtr TypeInteger) (OI indPtr)
       checkCmp = LLVMStmAssgn check $ ICmp Slt TypeInteger (OI ind) (OI len)
       br = LLVMStmInstr $ CondBranch (OI check) (show l2) (show l3)
@@ -366,7 +371,9 @@ transForeach t ind' arr stm = do
         GetElementPtr (TypePtr arrStrType) arrStrPtr [OT TypeInteger $ OC $ ConstInteger 0,
                                             OT TypeInteger $ OC $ ConstInteger 1,
                                             OT TypeInteger $ OI ind]
-      xLoad = LLVMStmAssgn x $ Load (TypePtr arrElemType) (OI xPtr)
+      xLoad = case arrElemType of
+        TypeArray _ _ -> LLVMStmEmpty
+        _             -> LLVMStmAssgn x $ Load (TypePtr arrElemType) (OI xPtr)
 
   bodyStms <- transStms [stm]
 
